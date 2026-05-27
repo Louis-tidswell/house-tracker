@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
-type ImportedProperty = {
+type SavedProperty = {
+  id: string;
   sourceUrl: string;
   title: string | null;
   address: string | null;
@@ -11,21 +12,12 @@ type ImportedProperty = {
   bathrooms: number | null;
   carSpaces: number | null;
   priceText: string | null;
-};
-
-type SavedProperty = ImportedProperty & {
-  id: string;
   notes: string;
   rankings: Record<string, number>;
   realestateUrl: string | null;
   domainUrl: string | null;
-};
-
-type ImportResult = {
-  ok: boolean;
-  property?: ImportedProperty;
-  error?: string;
-  manualRequired?: boolean;
+  status?: string | null;
+  suburb?: string | null;
 };
 
 type Profile = {
@@ -41,21 +33,7 @@ const COORDS_STORAGE_KEY = "house-tracker-coordinates-v1";
 const PropertyMap = dynamic(() => import("./components/PropertyMap"), { ssr: false });
 
 export default function Home() {
-  const [address, setAddress] = useState("");
-  const [realestateUrl, setRealestateUrl] = useState("");
-  const [domainUrl, setDomainUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [manualRequired, setManualRequired] = useState(false);
   const [ready, setReady] = useState(false);
-
-  const [manualTitle, setManualTitle] = useState("");
-  const [manualAddress, setManualAddress] = useState("");
-  const [manualPrice, setManualPrice] = useState("");
-  const [manualBedrooms, setManualBedrooms] = useState("");
-  const [manualBathrooms, setManualBathrooms] = useState("");
-  const [manualCarSpaces, setManualCarSpaces] = useState("");
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profileNameInput, setProfileNameInput] = useState("");
@@ -209,94 +187,6 @@ export default function Home() {
   const unmatched = sorted.filter((item) => !matchesFilters(item));
   const selected = sorted.find((item) => item.id === selectedId) ?? matched[0] ?? sorted[0] ?? null;
 
-  async function importProperty() {
-    const targetAddress = address.trim();
-    const targetRealestateUrl = realestateUrl.trim();
-    const targetDomainUrl = domainUrl.trim();
-    if (!targetAddress && !targetRealestateUrl && !targetDomainUrl) return;
-
-    setLoading(true);
-    setError(null);
-    setStatus(null);
-    setManualRequired(false);
-
-    try {
-      const response = await fetch("/api/import-property", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          address: targetAddress || undefined,
-          realestateUrl: targetRealestateUrl || undefined,
-          domainUrl: targetDomainUrl || undefined,
-        }),
-      });
-
-      const data = (await response.json()) as ImportResult;
-      if (!response.ok || !data.ok || !data.property) {
-        if (data.manualRequired) {
-          setManualRequired(true);
-          setError(data.error ?? "No match found.");
-          return;
-        }
-        throw new Error(data.error ?? "Import failed");
-      }
-
-      const entry: SavedProperty = {
-        ...data.property,
-        id: crypto.randomUUID(),
-        notes: activeProfile ? `${activeProfile.name}: ` : "",
-        rankings: activeProfileId ? { [activeProfileId]: 5 } : {},
-        realestateUrl: targetRealestateUrl || null,
-        domainUrl: targetDomainUrl || (data.property.sourceUrl.includes("domain.com.au") ? data.property.sourceUrl : null),
-      };
-
-      setSaved((prev) => [entry, ...prev]);
-      setSelectedId(entry.id);
-      setStatus("Imported successfully.");
-      setAddress("");
-      setRealestateUrl("");
-      setDomainUrl("");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Import failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function addManualProperty() {
-    if (!manualTitle.trim()) {
-      setError("Enter at least a title for manual entry.");
-      return;
-    }
-
-    const entry: SavedProperty = {
-      id: crypto.randomUUID(),
-      sourceUrl: domainUrl.trim() || realestateUrl.trim() || "manual-entry",
-      title: manualTitle.trim(),
-      address: manualAddress.trim() || address.trim() || null,
-      bedrooms: manualBedrooms ? Number(manualBedrooms) : null,
-      bathrooms: manualBathrooms ? Number(manualBathrooms) : null,
-      carSpaces: manualCarSpaces ? Number(manualCarSpaces) : null,
-      priceText: manualPrice.trim() || null,
-      notes: activeProfile ? `${activeProfile.name}: ` : "",
-      rankings: activeProfileId ? { [activeProfileId]: 5 } : {},
-      realestateUrl: realestateUrl.trim() || null,
-      domainUrl: domainUrl.trim() || null,
-    };
-
-    setSaved((prev) => [entry, ...prev]);
-    setSelectedId(entry.id);
-    setManualRequired(false);
-    setStatus("Added manually.");
-    setError(null);
-    setManualTitle("");
-    setManualAddress("");
-    setManualPrice("");
-    setManualBedrooms("");
-    setManualBathrooms("");
-    setManualCarSpaces("");
-  }
-
   function removeProperty(id: string) {
     setSaved((prev) => prev.filter((item) => item.id !== id));
     if (selectedId === id) setSelectedId(null);
@@ -346,21 +236,6 @@ export default function Home() {
     }));
   }
 
-  async function importFromClipboard() {
-    try {
-      const clip = await navigator.clipboard.readText();
-      if (!clip.trim()) {
-        setError("Clipboard is empty.");
-        return;
-      }
-      if (clip.includes("domain.com.au")) setDomainUrl(clip.trim());
-      else if (clip.includes("realestate.com.au")) setRealestateUrl(clip.trim());
-      else setAddress(clip.trim());
-    } catch {
-      setError("Clipboard read failed. Paste manually instead.");
-    }
-  }
-
   const mapItems = sorted
     .map((property) => ({ property, coord: coordinates[property.id] }))
     .filter((item) => Boolean(item.coord));
@@ -382,18 +257,9 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="rounded border p-3">
-        <h2 className="mb-2 text-lg font-semibold">Import</h2>
-        <div className="grid gap-2 md:grid-cols-3">
-          <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Address (preferred)" className="rounded border p-3" />
-          <input value={domainUrl} onChange={(event) => setDomainUrl(event.target.value)} placeholder="Domain URL" className="rounded border p-3" />
-          <input value={realestateUrl} onChange={(event) => setRealestateUrl(event.target.value)} placeholder="realestate URL" className="rounded border p-3" />
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button onClick={() => void importProperty()} disabled={loading || (!address.trim() && !domainUrl.trim() && !realestateUrl.trim())} className="rounded bg-black px-4 py-3 text-white disabled:opacity-50">{loading ? "Importing..." : "Import Property"}</button>
-          <button onClick={importFromClipboard} disabled={loading} className="rounded border px-4 py-3">Paste From Clipboard</button>
-        </div>
-      </section>
+      <a href="/properties/new" className="inline-flex items-center justify-center rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700">
+        + Add Property
+      </a>
 
       <section className="rounded border p-3">
         <h2 className="mb-2 text-lg font-semibold">Filters & Sort</h2>
@@ -412,26 +278,6 @@ export default function Home() {
         </div>
         <button onClick={clearFilters} className="mt-2 rounded border px-3 py-2">Clear Filters</button>
       </section>
-
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      {status ? <p className="text-sm text-green-700">{status}</p> : null}
-
-      {manualRequired ? (
-        <section className="rounded border p-3">
-          <h2 className="text-lg font-semibold">Manual Entry</h2>
-          <div className="grid gap-2 md:grid-cols-2">
-            <input value={manualTitle} onChange={(event) => setManualTitle(event.target.value)} placeholder="Title *" className="rounded border p-2" />
-            <input value={manualAddress} onChange={(event) => setManualAddress(event.target.value)} placeholder="Address" className="rounded border p-2" />
-            <input value={manualPrice} onChange={(event) => setManualPrice(event.target.value)} placeholder="Price" className="rounded border p-2" />
-            <div className="flex gap-2">
-              <input value={manualBedrooms} onChange={(event) => setManualBedrooms(event.target.value)} placeholder="Beds" className="w-full rounded border p-2" />
-              <input value={manualBathrooms} onChange={(event) => setManualBathrooms(event.target.value)} placeholder="Baths" className="w-full rounded border p-2" />
-              <input value={manualCarSpaces} onChange={(event) => setManualCarSpaces(event.target.value)} placeholder="Cars" className="w-full rounded border p-2" />
-            </div>
-          </div>
-          <button onClick={addManualProperty} className="mt-3 rounded bg-zinc-800 px-4 py-2 text-white">Save Manual Entry</button>
-        </section>
-      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-3">
