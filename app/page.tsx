@@ -43,6 +43,7 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [coordinates, setCoordinates] = useState<Coordinates>({});
   const [draftPriority, setDraftPriority] = useState<Record<string, number>>({});
+  const geocode_failed = useRef<Set<string>>(new Set());
 
   const [filterMinBeds, setFilterMinBeds] = useState("");
   const [filterMinBaths, setFilterMinBaths] = useState("");
@@ -131,15 +132,28 @@ export default function Home() {
   }, [coordinates, ready]);
 
   const geocodeProperty = useCallback(async (property: SavedProperty) => {
-    if (!property.address || coordinates[property.id]) return;
+    if (!property.address || coordinates[property.id] || geocode_failed.current.has(property.id)) return;
     try {
-      const response = await fetch(`/api/geocode?address=${encodeURIComponent(property.address)}`);
-      if (!response.ok) return;
+      // Include suburb in the query for better results
+      let query = property.address;
+      if (property.suburb && !query.toLowerCase().includes(property.suburb.toLowerCase())) {
+        query += `, ${property.suburb}`;
+      }
+      const params = new URLSearchParams({ address: query });
+      if (property.suburb) params.set("suburb", property.suburb);
+      const response = await fetch(`/api/geocode?${params.toString()}`);
+      if (!response.ok) {
+        geocode_failed.current.add(property.id);
+        return;
+      }
       const json = (await response.json()) as { ok: boolean; lat?: number; lon?: number };
-      if (!json.ok || typeof json.lat !== "number" || typeof json.lon !== "number") return;
+      if (!json.ok || typeof json.lat !== "number" || typeof json.lon !== "number") {
+        geocode_failed.current.add(property.id);
+        return;
+      }
       setCoordinates((prev) => ({ ...prev, [property.id]: { lat: json.lat as number, lon: json.lon as number } }));
     } catch {
-      // best effort only
+      geocode_failed.current.add(property.id);
     }
   }, [coordinates]);
 
@@ -454,7 +468,7 @@ export default function Home() {
               {unresolved.map((property) => (
                 <div key={property.id} className="mt-1 flex items-center justify-between gap-2">
                   <span>{property.address}</span>
-                  <button onClick={() => void geocodeProperty(property)} className="rounded border px-2 py-1">Retry</button>
+                  <button onClick={() => { geocode_failed.current.delete(property.id); void geocodeProperty(property); }} className="rounded border px-2 py-1">Retry</button>
                 </div>
               ))}
             </div>
