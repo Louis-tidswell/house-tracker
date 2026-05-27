@@ -24,3 +24,184 @@ body {
   color: var(--foreground);
   font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
+
+/* ═══ Retro Theme ═══ */
+
+[data-theme="retro"] {
+  --background: #0b0f0c;
+  --foreground: #d8ffe1;
+  --retro-panel: #111714;
+  --retro-border: #315b3d;
+  --retro-accent: #74ff95;
+  --retro-muted: #315b3d;
+  --retro-amber: #e0b15b;
+  --retro-danger: #d96c6c;
+  --retro-text-dim: #6b9b78;
+}
+
+[data-theme="retro"] body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Consolas", "Menlo", "Monaco", monospace;
+  background-image:
+    linear-gradient(rgba(116, 255, 149, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(116, 255, 149, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+[data-theme="retro"] .retro-panel {
+  background: var(--retro-panel);
+  border: 1px solid var(--retro-border);
+}
+
+[data-theme="retro"] .retro-input {
+  background: #0b0f0c;
+  border: 1px solid var(--retro-border);
+  color: var(--foreground);
+  transition: box-shadow 0.15s;
+}
+
+[data-theme="retro"] .retro-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--retro-accent), 0 0 8px rgba(116, 255, 149, 0.15);
+  border-color: var(--retro-accent);
+}
+
+[data-theme="retro"] .retro-input::placeholder {
+  color: var(--retro-text-dim);
+}
+
+[data-theme="retro"] .retro-btn {
+  background: transparent;
+  border: 1px solid var(--retro-border);
+  color: var(--foreground);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+[data-theme="retro"] .retro-btn:hover {
+  border-color: var(--retro-accent);
+  color: var(--retro-accent);
+}
+
+[data-theme="retro"] .retro-btn-primary {
+  background: transparent;
+  border: 2px solid var(--retro-accent);
+  color: var(--retro-accent);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+[data-theme="retro"] .retro-btn-primary:hover {
+  background: rgba(116, 255, 149, 0.08);
+}
+
+[data-theme="retro"] .retro-btn-primary:active {
+  background: rgba(116, 255, 149, 0.15);
+}
+
+[data-theme="retro"] .retro-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--retro-text-dim);
+  margin-bottom: 2px;
+}
+
+[data-theme="retro"] .retro-card {
+  background: var(--retro-panel);
+  border: 1px solid var(--retro-border);
+  transition: border-color 0.15s;
+}
+
+[data-theme="retro"] .retro-card-selected {
+  border-color: var(--retro-accent);
+  box-shadow: 0 0 12px rgba(116, 255, 149, 0.1);
+}
+
+[data-theme="retro"] .retro-heading {
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--retro-amber);
+}
+
+[data-theme="retro"] .retro-separator {
+  border-top: 1px solid var(--retro-border);
+  margin: 8px 0;
+}
+
+[data-theme="retro"] .retro-danger {
+  color: var(--retro-danger);
+  border-color: var(--retro-danger);
+}
+
+[data-theme="retro"] .retro-danger:hover {
+  background: rgba(217, 108, 108, 0.1);
+}
+
+[data-theme="retro"] .retro-link {
+  color: var(--retro-amber);
+  border-color: var(--retro-muted);
+}
+
+[data-theme="retro"] .retro-link:hover {
+  border-color: var(--retro-amber);
+}
+
+/* Retro range slider */
+[data-theme="retro"] input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 20px;
+}
+
+[data-theme="retro"] input[type="range"]::-webkit-slider-track {
+  background: var(--retro-panel);
+  border: 1px solid var(--retro-border);
+  height: 6px;
+  border-radius: 0;
+}
+
+[data-theme="retro"] input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--retro-accent);
+  border: none;
+  border-radius: 0;
+  margin-top: -5px;
+  cursor: pointer;
+}
+
+[data-theme="retro"] input[type="range"]::-moz-range-track {
+  background: var(--retro-panel);
+  border: 1px solid var(--retro-border);
+  height: 6px;
+  border-radius: 0;
+}
+
+[data-theme="retro"] input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--retro-accent);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+/* Retro scrollbar */
+[data-theme="retro"] ::-webkit-scrollbar {
+  width: 6px;
+}
+
+[data-theme="retro"] ::-webkit-scrollbar-track {
+  background: var(--retro-panel);
+}
+
+[data-theme="retro"] ::-webkit-scrollbar-thumb {
+  background: var(--retro-border);
+}
+
