@@ -27,13 +27,13 @@ type Profile = {
 
 type Coordinates = Record<string, { lat: number; lon: number }>;
 
-const STORAGE_KEY = "house-tracker-properties-v3";
-const PROFILE_STORAGE_KEY = "house-tracker-profiles-v2";
 const COORDS_STORAGE_KEY = "house-tracker-coordinates-v1";
+const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
 const PropertyMap = dynamic(() => import("./components/PropertyMap"), { ssr: false });
 
 export default function Home() {
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profileNameInput, setProfileNameInput] = useState("");
@@ -51,6 +51,7 @@ export default function Home() {
   const [sortBy, setSortBy] = useState<"priority" | "beds" | "baths" | "cars" | "price">("priority");
 
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const notes_timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null;
   const priorityProfiles = useMemo(() => {
@@ -59,69 +60,75 @@ export default function Home() {
     return profiles.filter((profile) => profile.name !== "Profile 1");
   }, [profiles]);
 
+  // Load data from API on mount
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const savedRaw = localStorage.getItem(STORAGE_KEY);
-      if (savedRaw) {
-        try {
-          const parsed = JSON.parse(savedRaw) as SavedProperty[];
-          const migrated = parsed.map((item) => ({
-            ...item,
-            notes: typeof (item as { notes?: unknown }).notes === "string" ? (item as { notes?: string }).notes ?? "" : "",
-          }));
-          setSaved(migrated);
-        } catch {
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
+    async function load_data() {
+      try {
+        const [props_res, profiles_res] = await Promise.all([
+          fetch("/api/properties"),
+          fetch("/api/profiles"),
+        ]);
 
-      const coordsRaw = localStorage.getItem(COORDS_STORAGE_KEY);
-      if (coordsRaw) {
-        try {
-          setCoordinates(JSON.parse(coordsRaw) as Coordinates);
-        } catch {
-          localStorage.removeItem(COORDS_STORAGE_KEY);
+        if (!props_res.ok || !profiles_res.ok) {
+          setLoadError("Failed to load data from server.");
+          setReady(true);
+          return;
         }
-      }
 
-      const profilesRaw = localStorage.getItem(PROFILE_STORAGE_KEY);
-      if (profilesRaw) {
-        try {
-          const parsed = JSON.parse(profilesRaw) as { profiles: Profile[]; activeProfileId: string };
-          if (parsed.profiles.length) {
-            setProfiles(parsed.profiles);
-            setActiveProfileId(parsed.activeProfileId || parsed.profiles[0].id);
-            setReady(true);
-            return;
+        const props_json = await props_res.json();
+        const profiles_json = await profiles_res.json();
+
+        if (props_json.ok) {
+          setSaved(props_json.properties);
+        }
+
+        if (profiles_json.ok && profiles_json.profiles.length > 0) {
+          setProfiles(profiles_json.profiles);
+          const stored_active = localStorage.getItem(ACTIVE_PROFILE_KEY);
+          const valid = profiles_json.profiles.find((p: Profile) => p.id === stored_active);
+          setActiveProfileId(valid ? stored_active! : profiles_json.profiles[0].id);
+        } else {
+          // Create a default profile in the DB
+          const res = await fetch("/api/profiles", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "Profile 1" }),
+          });
+          const json = await res.json();
+          if (json.ok) {
+            setProfiles([json.profile]);
+            setActiveProfileId(json.profile.id);
           }
-        } catch {
-          localStorage.removeItem(PROFILE_STORAGE_KEY);
         }
+
+        // Load geocode cache from localStorage (per-browser cache)
+        const coordsRaw = localStorage.getItem(COORDS_STORAGE_KEY);
+        if (coordsRaw) {
+          try {
+            setCoordinates(JSON.parse(coordsRaw) as Coordinates);
+          } catch {
+            localStorage.removeItem(COORDS_STORAGE_KEY);
+          }
+        }
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : "Failed to connect to server.");
       }
-
-      const defaultProfile = { id: crypto.randomUUID(), name: "Profile 1" };
-      setProfiles([defaultProfile]);
-      setActiveProfileId(defaultProfile.id);
       setReady(true);
-    }, 0);
-
-    return () => window.clearTimeout(timer);
+    }
+    void load_data();
   }, []);
 
+  // Persist active profile choice locally
   useEffect(() => {
-    if (!ready) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-  }, [saved, ready]);
+    if (!ready || !activeProfileId) return;
+    localStorage.setItem(ACTIVE_PROFILE_KEY, activeProfileId);
+  }, [activeProfileId, ready]);
 
+  // Persist coordinates cache locally
   useEffect(() => {
     if (!ready) return;
     localStorage.setItem(COORDS_STORAGE_KEY, JSON.stringify(coordinates));
   }, [coordinates, ready]);
-
-  useEffect(() => {
-    if (!ready || !profiles.length) return;
-    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({ profiles, activeProfileId }));
-  }, [profiles, activeProfileId, ready]);
 
   const geocodeProperty = useCallback(async (property: SavedProperty) => {
     if (!property.address || coordinates[property.id]) return;
@@ -190,16 +197,22 @@ export default function Home() {
   function removeProperty(id: string) {
     setSaved((prev) => prev.filter((item) => item.id !== id));
     if (selectedId === id) setSelectedId(null);
+    void fetch(`/api/properties/${id}`, { method: "DELETE" });
   }
 
   function commitPriority(propertyId: string) {
     const value = draftPriority[propertyId];
     if (typeof value !== "number" || !activeProfileId) return;
 
-    setSaved((prev) => prev.map((property) =>
-      property.id === propertyId
-        ? { ...property, rankings: { ...property.rankings, [activeProfileId]: value } }
-        : property,
+    const property = saved.find((p) => p.id === propertyId);
+    if (!property) return;
+
+    const new_rankings = { ...property.rankings, [activeProfileId]: value };
+
+    setSaved((prev) => prev.map((p) =>
+      p.id === propertyId
+        ? { ...p, rankings: new_rankings }
+        : p,
     ));
 
     setDraftPriority((prev) => {
@@ -207,15 +220,31 @@ export default function Home() {
       delete next[propertyId];
       return next;
     });
+
+    void fetch(`/api/properties/${propertyId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rankings: new_rankings }),
+    });
   }
 
   function addProfile() {
     const name = profileNameInput.trim();
     if (!name) return;
-    const newProfile = { id: crypto.randomUUID(), name };
-    setProfiles((prev) => [...prev, newProfile]);
-    setActiveProfileId(newProfile.id);
-    setProfileNameInput("");
+
+    void (async () => {
+      const res = await fetch("/api/profiles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setProfiles((prev) => [...prev, json.profile]);
+        setActiveProfileId(json.profile.id);
+        setProfileNameInput("");
+      }
+    })();
   }
 
   function clearFilters() {
@@ -230,10 +259,39 @@ export default function Home() {
     const prefix = `${activeProfile.name}: `;
     setSaved((prev) => prev.map((property) => {
       if (property.id !== propertyId) return property;
-      if (!property.notes.trim()) return { ...property, notes: prefix };
-      if (property.notes.includes(prefix)) return property;
-      return { ...property, notes: `${property.notes}\n${prefix}` };
+      let new_notes = property.notes;
+      if (!property.notes.trim()) {
+        new_notes = prefix;
+      } else if (!property.notes.includes(prefix)) {
+        new_notes = `${property.notes}\n${prefix}`;
+      } else {
+        return property;
+      }
+      void fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notes: new_notes }),
+      });
+      return { ...property, notes: new_notes };
     }));
+  }
+
+  function update_notes(propertyId: string, new_notes: string) {
+    setSaved((prev) => prev.map((item) =>
+      item.id === propertyId ? { ...item, notes: new_notes } : item
+    ));
+
+    // Debounce the API call to avoid hammering the server on every keystroke
+    if (notes_timers.current[propertyId]) {
+      clearTimeout(notes_timers.current[propertyId]);
+    }
+    notes_timers.current[propertyId] = setTimeout(() => {
+      void fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notes: new_notes }),
+      });
+    }, 800);
   }
 
   const mapItems = sorted
@@ -241,6 +299,20 @@ export default function Home() {
     .filter((item) => Boolean(item.coord));
 
   const unresolved = sorted.filter((property) => property.address && !coordinates[property.id]);
+
+  if (!ready) {
+    return <main className="flex h-screen items-center justify-center"><p>Loading...</p></main>;
+  }
+
+  if (loadError) {
+    return (
+      <main className="mx-auto max-w-lg p-8">
+        <h1 className="text-2xl font-bold text-red-600">Connection Error</h1>
+        <p className="mt-2">{loadError}</p>
+        <button onClick={() => window.location.reload()} className="mt-4 rounded bg-black px-4 py-2 text-white">Retry</button>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 md:p-8">
@@ -345,7 +417,7 @@ export default function Home() {
                   </div>
                   <textarea
                     value={property.notes}
-                    onChange={(event) => setSaved((prev) => prev.map((item) => item.id === property.id ? { ...item, notes: event.target.value } : item))}
+                    onChange={(event) => update_notes(property.id, event.target.value)}
                     className="w-full rounded border p-2 text-sm"
                     rows={5}
                     placeholder="Shared notes (editable by everyone)"

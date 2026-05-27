@@ -12,29 +12,11 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
 
-const STORAGE_KEY = "house-tracker-properties-v3";
-const PROFILE_STORAGE_KEY = "house-tracker-profiles-v2";
+const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
 
 type Profile = {
     id: string;
     name: string;
-};
-
-type SavedProperty = {
-    id: string;
-    sourceUrl: string;
-    title: string | null;
-    address: string | null;
-    bedrooms: number | null;
-    bathrooms: number | null;
-    carSpaces: number | null;
-    priceText: string | null;
-    notes: string;
-    rankings: Record<string, number>;
-    realestateUrl: string | null;
-    domainUrl: string | null;
-    status: string | null;
-    suburb: string | null;
 };
 
 const STATUS_OPTIONS = [
@@ -96,32 +78,38 @@ function AddPropertyForm() {
         }
     }, [search_params]);
 
-    // Load profiles from localStorage
+    // Load profiles from API
     useEffect(() => {
-        const profiles_raw = localStorage.getItem(PROFILE_STORAGE_KEY);
-        if (profiles_raw) {
+        void (async () => {
             try {
-                const parsed = JSON.parse(profiles_raw) as { profiles: Profile[]; activeProfileId: string };
-                if (parsed.profiles.length) {
-                    setProfiles(parsed.profiles);
-                    setActiveProfileId(parsed.activeProfileId || parsed.profiles[0].id);
+                const res = await fetch("/api/profiles");
+                const json = await res.json();
+                if (json.ok && json.profiles.length > 0) {
+                    setProfiles(json.profiles);
+                    const stored_active = localStorage.getItem(ACTIVE_PROFILE_KEY);
+                    const valid = json.profiles.find((p: Profile) => p.id === stored_active);
+                    setActiveProfileId(valid ? stored_active! : json.profiles[0].id);
                 }
             } catch {
-                // ignore
+                // ignore - profiles are optional for saving
             }
-        }
+        })();
     }, []);
 
-    function handle_save() {
+    const [saving, setSaving] = useState(false);
+
+    async function handle_save() {
         if (!title.trim() && !listing_url.trim()) {
             setError("Enter at least a title or listing URL.");
             return;
         }
 
+        setSaving(true);
+        setError(null);
+
         const urls = classify_url(listing_url.trim());
 
-        const entry: SavedProperty = {
-            id: crypto.randomUUID(),
+        const entry = {
             sourceUrl: listing_url.trim() || "manual-entry",
             title: title.trim() || null,
             address: title.trim() || null,
@@ -137,20 +125,23 @@ function AddPropertyForm() {
             status: status || null,
         };
 
-        // Load existing properties, prepend new one, save back
-        const existing_raw = localStorage.getItem(STORAGE_KEY);
-        let existing: SavedProperty[] = [];
-        if (existing_raw) {
-            try {
-                existing = JSON.parse(existing_raw) as SavedProperty[];
-            } catch {
-                // ignore
+        try {
+            const res = await fetch("/api/properties", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(entry),
+            });
+            const json = await res.json();
+            if (!json.ok) {
+                setError(json.error || "Failed to save property.");
+                setSaving(false);
+                return;
             }
+            router.push("/");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Network error.");
+            setSaving(false);
         }
-        existing.unshift(entry);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
-
-        router.push("/");
     }
 
     return (
@@ -291,10 +282,11 @@ function AddPropertyForm() {
                 )}
 
                 <button
-                    onClick={handle_save}
-                    className="mt-2 rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700"
+                    onClick={() => void handle_save()}
+                    disabled={saving}
+                    className="mt-2 rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700 disabled:opacity-50"
                 >
-                    Save Property
+                    {saving ? "Saving..." : "Save Property"}
                 </button>
             </div>
         </main>
