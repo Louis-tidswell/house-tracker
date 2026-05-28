@@ -5,14 +5,22 @@
 /// @brief GET all properties, POST a new property.
 
 import { create_supabase_client } from "@/lib/supabase";
+import { NextRequest } from "next/server";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     const supabase = create_supabase_client();
+    const listId = request.nextUrl.searchParams.get("listId");
 
-    const { data, error } = await supabase
+    let query = supabase
         .from("properties")
         .select("*")
         .order("created_at", { ascending: false });
+
+    if (listId) {
+        query = query.eq("list_id", listId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         return Response.json({ ok: false, error: error.message }, { status: 500 });
@@ -34,6 +42,7 @@ export async function GET() {
         realestateUrl: row.realestate_url,
         domainUrl: row.domain_url,
         status: row.status,
+        listId: row.list_id,
     }));
 
     return Response.json({ ok: true, properties });
@@ -43,6 +52,19 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     const supabase = create_supabase_client();
+
+    // If no listId provided, find the default list
+    let list_id = body.listId || null;
+    if (!list_id) {
+        const { data: default_list } = await supabase
+            .from("property_lists")
+            .select("id")
+            .eq("is_default", true)
+            .single();
+        if (default_list) {
+            list_id = default_list.id;
+        }
+    }
 
     const row = {
         id: body.id || undefined,
@@ -59,6 +81,7 @@ export async function POST(request: Request) {
         realestate_url: body.realestateUrl || null,
         domain_url: body.domainUrl || null,
         status: body.status || null,
+        list_id: list_id,
     };
 
     const { data, error } = await supabase
@@ -86,6 +109,7 @@ export async function POST(request: Request) {
         realestateUrl: data.realestate_url,
         domainUrl: data.domain_url,
         status: data.status,
+        listId: data.list_id,
     };
 
     return Response.json({ ok: true, property }, { status: 201 });

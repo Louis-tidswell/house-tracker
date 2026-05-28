@@ -30,6 +30,13 @@ type Coordinates = Record<string, { lat: number; lon: number }>;
 type Theme = "default" | "retro";
 type Tab = "active" | "archived";
 
+type PropertyList = {
+  id: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+};
+
 type EditDraft = {
   title: string;
   address: string;
@@ -45,6 +52,7 @@ type EditDraft = {
 const COORDS_STORAGE_KEY = "house-tracker-coordinates-v1";
 const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
 const THEME_KEY = "house-tracker-theme";
+const CURRENT_LIST_KEY = "house-tracker-current-list-id";
 const PropertyMap = dynamic(() => import("./components/PropertyMap"), { ssr: false });
 
 export default function Home() {
@@ -72,6 +80,20 @@ export default function Home() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+
+  const [propertyLists, setPropertyLists] = useState<PropertyList[]>([]);
+  const [activeListId, setActiveListId] = useState<string>("");
+  const [newListName, setNewListName] = useState("");
+
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editProfileName, setEditProfileName] = useState("");
+  const [confirmDeleteProfileId, setConfirmDeleteProfileId] = useState<string | null>(null);
+
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [editListName, setEditListName] = useState("");
+  const [confirmDeleteListId, setConfirmDeleteListId] = useState<string | null>(null);
+
+  const [movePropertyId, setMovePropertyId] = useState<string | null>(null);
 
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
   const notes_timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -102,24 +124,21 @@ export default function Home() {
   useEffect(() => {
     async function load_data() {
       try {
-        const [props_res, profiles_res] = await Promise.all([
-          fetch("/api/properties"),
+        const [profiles_res, lists_res] = await Promise.all([
           fetch("/api/profiles"),
+          fetch("/api/property-lists"),
         ]);
 
-        if (!props_res.ok || !profiles_res.ok) {
+        if (!profiles_res.ok || !lists_res.ok) {
           setLoadError("Failed to load data from server.");
           setReady(true);
           return;
         }
 
-        const props_json = await props_res.json();
         const profiles_json = await profiles_res.json();
+        const lists_json = await lists_res.json();
 
-        if (props_json.ok) {
-          setSaved(props_json.properties);
-        }
-
+        // Set up profiles
         if (profiles_json.ok && profiles_json.profiles.length > 0) {
           setProfiles(profiles_json.profiles);
           const stored_active = localStorage.getItem(ACTIVE_PROFILE_KEY);
@@ -135,6 +154,24 @@ export default function Home() {
           if (json.ok) {
             setProfiles([json.profile]);
             setActiveProfileId(json.profile.id);
+          }
+        }
+
+        // Set up lists and load properties for selected list
+        if (lists_json.ok && lists_json.lists.length > 0) {
+          setPropertyLists(lists_json.lists);
+          const stored_list = localStorage.getItem(CURRENT_LIST_KEY);
+          const valid_list = lists_json.lists.find((l: PropertyList) => l.id === stored_list);
+          const selected_id = valid_list ? stored_list! : lists_json.lists[0].id;
+          setActiveListId(selected_id);
+
+          // Fetch properties for the selected list
+          const props_res = await fetch(`/api/properties?listId=${selected_id}`);
+          if (props_res.ok) {
+            const props_json = await props_res.json();
+            if (props_json.ok) {
+              setSaved(props_json.properties);
+            }
           }
         }
 
@@ -163,6 +200,44 @@ export default function Home() {
     if (!ready) return;
     localStorage.setItem(COORDS_STORAGE_KEY, JSON.stringify(coordinates));
   }, [coordinates, ready]);
+
+  // Persist active list and reload properties when list changes
+  useEffect(() => {
+    if (!ready || !activeListId) return;
+    localStorage.setItem(CURRENT_LIST_KEY, activeListId);
+  }, [activeListId, ready]);
+
+  function switchList(listId: string) {
+    setActiveListId(listId);
+    void (async () => {
+      const res = await fetch(`/api/properties?listId=${listId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok) {
+          setSaved(json.properties);
+        }
+      }
+    })();
+  }
+
+  function createList() {
+    const name = newListName.trim();
+    if (!name) return;
+
+    void (async () => {
+      const res = await fetch("/api/property-lists", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setPropertyLists((prev) => [...prev, json.list]);
+        setNewListName("");
+        switchList(json.list.id);
+      }
+    })();
+  }
 
   const geocodeProperty = useCallback(async (property: SavedProperty) => {
     if (!property.address || coordinates[property.id] || geocode_failed.current.has(property.id)) return;
@@ -367,6 +442,84 @@ export default function Home() {
     })();
   }
 
+  function renameProfile(profileId: string) {
+    const name = editProfileName.trim();
+    if (!name) return;
+    void (async () => {
+      const res = await fetch(`/api/profiles/${profileId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setProfiles((prev) => prev.map((p) => p.id === profileId ? { ...p, name } : p));
+        setEditingProfileId(null);
+        setEditProfileName("");
+      }
+    })();
+  }
+
+  function deleteProfile(profileId: string) {
+    void (async () => {
+      const res = await fetch(`/api/profiles/${profileId}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.ok) {
+        setProfiles((prev) => prev.filter((p) => p.id !== profileId));
+        if (activeProfileId === profileId && profiles.length > 1) {
+          const remaining = profiles.filter((p) => p.id !== profileId);
+          setActiveProfileId(remaining[0]?.id ?? "");
+        }
+        setConfirmDeleteProfileId(null);
+      }
+    })();
+  }
+
+  function renameList(listId: string) {
+    const name = editListName.trim();
+    if (!name) return;
+    void (async () => {
+      const res = await fetch(`/api/property-lists/${listId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setPropertyLists((prev) => prev.map((l) => l.id === listId ? { ...l, name } : l));
+        setEditingListId(null);
+        setEditListName("");
+      }
+    })();
+  }
+
+  function deleteList(listId: string) {
+    void (async () => {
+      const res = await fetch(`/api/property-lists/${listId}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.ok) {
+        setPropertyLists((prev) => prev.filter((l) => l.id !== listId));
+        if (activeListId === listId) {
+          const remaining = propertyLists.filter((l) => l.id !== listId);
+          if (remaining.length > 0) {
+            switchList(remaining[0].id);
+          }
+        }
+        setConfirmDeleteListId(null);
+      }
+    })();
+  }
+
+  function moveProperty(propertyId: string, targetListId: string) {
+    setSaved((prev) => prev.filter((p) => p.id !== propertyId));
+    setMovePropertyId(null);
+    void fetch(`/api/properties/${propertyId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ listId: targetListId }),
+    });
+  }
+
   function clearFilters() {
     setFilterMinBeds("");
     setFilterMinBaths("");
@@ -513,11 +666,60 @@ export default function Home() {
               {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
             </select>
             <input value={profileNameInput} onChange={(event) => setProfileNameInput(event.target.value)} placeholder="Add profile name" className="rounded border p-2" />
-            <button onClick={addProfile} className="rounded border px-3 py-2">Add Profile</button>
+            <button onClick={addProfile} className="rounded border px-3 py-2">+</button>
+            {editingProfileId === activeProfileId ? (
+              <span className="flex items-center gap-1">
+                <input value={editProfileName} onChange={(e) => setEditProfileName(e.target.value)} className="rounded border p-2 w-32" />
+                <button onClick={() => renameProfile(activeProfileId)} className="rounded border px-2 py-2 text-sm">Save</button>
+                <button onClick={() => setEditingProfileId(null)} className="rounded border px-2 py-2 text-sm">Cancel</button>
+              </span>
+            ) : (
+              <button onClick={() => { setEditingProfileId(activeProfileId); setEditProfileName(profiles.find((p) => p.id === activeProfileId)?.name ?? ""); }} className="rounded border px-2 py-2 text-sm">Edit</button>
+            )}
+            {confirmDeleteProfileId === activeProfileId ? (
+              <span className="flex items-center gap-1 text-sm">
+                <span className="text-red-600">Delete?</span>
+                <button onClick={() => deleteProfile(activeProfileId)} className="font-bold text-red-600">Yes</button>
+                <button onClick={() => setConfirmDeleteProfileId(null)} className="text-zinc-500">No</button>
+              </span>
+            ) : (
+              <button onClick={() => setConfirmDeleteProfileId(activeProfileId)} className="rounded border px-2 py-2 text-sm text-red-600">Delete</button>
+            )}
           </div>
         </section>
 
-        <a href="/properties/new" className="inline-flex items-center justify-center rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700">
+        <section className="rounded border p-3">
+          <h2 className="mb-2 text-lg font-semibold">Current List</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={activeListId} onChange={(event) => switchList(event.target.value)} className="rounded border p-2">
+              {propertyLists.map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}
+            </select>
+            <input value={newListName} onChange={(event) => setNewListName(event.target.value)} placeholder="New list name" className="rounded border p-2" />
+            <button onClick={createList} className="rounded border px-3 py-2">+</button>
+            {editingListId === activeListId ? (
+              <span className="flex items-center gap-1">
+                <input value={editListName} onChange={(e) => setEditListName(e.target.value)} className="rounded border p-2 w-32" />
+                <button onClick={() => renameList(activeListId)} className="rounded border px-2 py-2 text-sm">Save</button>
+                <button onClick={() => setEditingListId(null)} className="rounded border px-2 py-2 text-sm">Cancel</button>
+              </span>
+            ) : (
+              <button onClick={() => { setEditingListId(activeListId); setEditListName(propertyLists.find((l) => l.id === activeListId)?.name ?? ""); }} className="rounded border px-2 py-2 text-sm">Edit</button>
+            )}
+            {!propertyLists.find((l) => l.id === activeListId)?.isDefault && (
+              confirmDeleteListId === activeListId ? (
+                <span className="flex items-center gap-1 text-sm">
+                  <span className="text-red-600">Delete?</span>
+                  <button onClick={() => deleteList(activeListId)} className="font-bold text-red-600">Yes</button>
+                  <button onClick={() => setConfirmDeleteListId(null)} className="text-zinc-500">No</button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmDeleteListId(activeListId)} className="rounded border px-2 py-2 text-sm text-red-600">Delete</button>
+              )
+            )}
+          </div>
+        </section>
+
+        <a href={`/properties/new?listId=${activeListId}`} className="inline-flex items-center justify-center rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700">
           + Add Property
         </a>
 
@@ -615,6 +817,17 @@ export default function Home() {
                         {activeTab === "archived" && (
                           <button onClick={(e) => { e.stopPropagation(); unarchiveProperty(property.id); }} className="text-sm text-green-600">Unarchive</button>
                         )}
+                        {movePropertyId === property.id ? (
+                          <span className="flex items-center gap-1 text-sm" onClick={(e) => e.stopPropagation()}>
+                            <select onChange={(e) => { if (e.target.value) moveProperty(property.id, e.target.value); }} defaultValue="" className="rounded border px-1 py-0.5 text-sm">
+                              <option value="" disabled>Move to...</option>
+                              {propertyLists.filter((l) => l.id !== activeListId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                            </select>
+                            <button onClick={(e) => { e.stopPropagation(); setMovePropertyId(null); }} className="text-zinc-500">Cancel</button>
+                          </span>
+                        ) : (
+                          <button onClick={(e) => { e.stopPropagation(); setMovePropertyId(property.id); }} className="text-sm text-purple-600">Move</button>
+                        )}
                         {confirmDeleteId === property.id ? (
                           <span className="flex items-center gap-1 text-sm">
                             <span className="text-red-600">Delete?</span>
@@ -710,11 +923,74 @@ export default function Home() {
             />
             <button onClick={addProfile} className="retro-btn rounded px-2 py-1.5 text-xs">+</button>
           </div>
+          {editingProfileId === activeProfileId ? (
+            <div className="flex items-center gap-1">
+              <input value={editProfileName} onChange={(e) => setEditProfileName(e.target.value)} className="retro-input rounded px-2 py-1 text-xs w-24" />
+              <button onClick={() => renameProfile(activeProfileId)} className="retro-btn rounded px-2 py-0.5 text-xs">SAVE</button>
+              <button onClick={() => setEditingProfileId(null)} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>X</button>
+            </div>
+          ) : (
+            <button onClick={() => { setEditingProfileId(activeProfileId); setEditProfileName(profiles.find((p) => p.id === activeProfileId)?.name ?? ""); }} className="retro-btn rounded px-2 py-0.5 text-xs">EDIT</button>
+          )}
+          {confirmDeleteProfileId === activeProfileId ? (
+            <span className="flex items-center gap-1 text-xs">
+              <span style={{ color: "#d96c6c" }}>DELETE?</span>
+              <button onClick={() => deleteProfile(activeProfileId)} className="retro-btn rounded px-2 py-0.5 text-xs font-bold" style={{ color: "#d96c6c" }}>YES</button>
+              <button onClick={() => setConfirmDeleteProfileId(null)} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>NO</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmDeleteProfileId(activeProfileId)} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "#d96c6c" }}>DEL</button>
+          )}
+        </div>
+      </section>
+
+      {/* Current Mission Panel */}
+      <section className="retro-panel rounded p-4">
+        <p className="retro-heading mb-3">CURRENT MISSION</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={activeListId}
+            onChange={(event) => switchList(event.target.value)}
+            className="retro-input rounded px-2 py-1.5 text-xs"
+          >
+            {propertyLists.map((list) => (
+              <option key={list.id} value={list.id}>{list.name.toUpperCase()}</option>
+            ))}
+          </select>
+          <div className="flex items-center gap-1">
+            <input
+              value={newListName}
+              onChange={(event) => setNewListName(event.target.value)}
+              placeholder="New mission..."
+              className="retro-input rounded px-2 py-1.5 text-xs w-32"
+            />
+            <button onClick={createList} className="retro-btn rounded px-2 py-1.5 text-xs">+</button>
+          </div>
+          {editingListId === activeListId ? (
+            <div className="flex items-center gap-1">
+              <input value={editListName} onChange={(e) => setEditListName(e.target.value)} className="retro-input rounded px-2 py-1 text-xs w-28" />
+              <button onClick={() => renameList(activeListId)} className="retro-btn rounded px-2 py-0.5 text-xs">SAVE</button>
+              <button onClick={() => setEditingListId(null)} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>X</button>
+            </div>
+          ) : (
+            <button onClick={() => { setEditingListId(activeListId); setEditListName(propertyLists.find((l) => l.id === activeListId)?.name ?? ""); }} className="retro-btn rounded px-2 py-0.5 text-xs">EDIT</button>
+          )}
+          {!propertyLists.find((l) => l.id === activeListId)?.isDefault && (
+            confirmDeleteListId === activeListId ? (
+              <span className="flex items-center gap-1 text-xs">
+                <span style={{ color: "#d96c6c" }}>DELETE?</span>
+                <button onClick={() => deleteList(activeListId)} className="retro-btn rounded px-2 py-0.5 text-xs font-bold" style={{ color: "#d96c6c" }}>YES</button>
+                <button onClick={() => setConfirmDeleteListId(null)} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>NO</button>
+              </span>
+            ) : (
+              <button onClick={() => setConfirmDeleteListId(activeListId)} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "#d96c6c" }}>DEL</button>
+            )
+          )}
         </div>
       </section>
 
       {/* Add Property Command Button */}
-      <a href="/properties/new" className="retro-btn-primary inline-flex items-center justify-center rounded px-6 py-3 text-base tracking-wider">
+      <a href={`/properties/new?listId=${activeListId}`} className="retro-btn-primary inline-flex items-center justify-center rounded px-6 py-3 text-base tracking-wider">
         [ + ADD PROPERTY ]
       </a>
 
@@ -891,6 +1167,17 @@ export default function Home() {
                       )}
                       {activeTab === "archived" && (
                         <button onClick={(e) => { e.stopPropagation(); unarchiveProperty(property.id); }} className="retro-btn rounded px-2 py-1 text-xs" style={{ color: "var(--retro-accent)" }}>UNARCHIVE</button>
+                      )}
+                      {movePropertyId === property.id ? (
+                        <span className="flex items-center gap-1 text-xs" onClick={(e) => e.stopPropagation()}>
+                          <select onChange={(e) => { if (e.target.value) moveProperty(property.id, e.target.value); }} defaultValue="" className="retro-input rounded px-1 py-0.5 text-xs">
+                            <option value="" disabled>Move to...</option>
+                            {propertyLists.filter((l) => l.id !== activeListId).map((l) => <option key={l.id} value={l.id}>{l.name.toUpperCase()}</option>)}
+                          </select>
+                          <button onClick={(e) => { e.stopPropagation(); setMovePropertyId(null); }} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>X</button>
+                        </span>
+                      ) : (
+                        <button onClick={(e) => { e.stopPropagation(); setMovePropertyId(property.id); }} className="retro-btn rounded px-2 py-1 text-xs" style={{ color: "var(--retro-muted)" }}>MOVE</button>
                       )}
                       {confirmDeleteId === property.id ? (
                         <span className="flex items-center gap-1 text-xs">

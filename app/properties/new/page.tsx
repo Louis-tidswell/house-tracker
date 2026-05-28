@@ -14,12 +14,20 @@ import { Suspense } from "react";
 
 const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
 const THEME_KEY = "house-tracker-theme";
+const CURRENT_LIST_KEY = "house-tracker-current-list-id";
 
 type Theme = "default" | "retro";
 
 type Profile = {
     id: string;
     name: string;
+};
+
+type PropertyList = {
+    id: string;
+    name: string;
+    description: string | null;
+    isDefault: boolean;
 };
 
 const STATUS_OPTIONS = [
@@ -59,6 +67,8 @@ function AddPropertyForm() {
     const [active_profile_id, setActiveProfileId] = useState("");
     const [ranking, setRanking] = useState(5);
     const [error, setError] = useState<string | null>(null);
+    const [propertyLists, setPropertyLists] = useState<PropertyList[]>([]);
+    const [selectedListId, setSelectedListId] = useState("");
 
     // Theme management
     useEffect(() => {
@@ -97,23 +107,43 @@ function AddPropertyForm() {
         }
     }, [search_params]);
 
-    // Load profiles from API
+    // Load profiles and lists from API
     useEffect(() => {
+        const param_list_id = search_params.get("listId") || "";
+
         void (async () => {
             try {
-                const res = await fetch("/api/profiles");
-                const json = await res.json();
-                if (json.ok && json.profiles.length > 0) {
-                    setProfiles(json.profiles);
+                const [profiles_res, lists_res] = await Promise.all([
+                    fetch("/api/profiles"),
+                    fetch("/api/property-lists"),
+                ]);
+                const profiles_json = await profiles_res.json();
+                const lists_json = await lists_res.json();
+
+                if (profiles_json.ok && profiles_json.profiles.length > 0) {
+                    setProfiles(profiles_json.profiles);
                     const stored_active = localStorage.getItem(ACTIVE_PROFILE_KEY);
-                    const valid = json.profiles.find((p: Profile) => p.id === stored_active);
-                    setActiveProfileId(valid ? stored_active! : json.profiles[0].id);
+                    const valid = profiles_json.profiles.find((p: Profile) => p.id === stored_active);
+                    setActiveProfileId(valid ? stored_active! : profiles_json.profiles[0].id);
+                }
+
+                if (lists_json.ok && lists_json.lists.length > 0) {
+                    setPropertyLists(lists_json.lists);
+                    // Priority: query param > localStorage > default list
+                    const stored_list = localStorage.getItem(CURRENT_LIST_KEY);
+                    if (param_list_id && lists_json.lists.find((l: PropertyList) => l.id === param_list_id)) {
+                        setSelectedListId(param_list_id);
+                    } else if (stored_list && lists_json.lists.find((l: PropertyList) => l.id === stored_list)) {
+                        setSelectedListId(stored_list);
+                    } else {
+                        setSelectedListId(lists_json.lists[0].id);
+                    }
                 }
             } catch {
-                // ignore - profiles are optional for saving
+                // ignore - profiles/lists are optional for saving
             }
         })();
-    }, []);
+    }, [search_params]);
 
     const [saving, setSaving] = useState(false);
 
@@ -142,6 +172,7 @@ function AddPropertyForm() {
             realestateUrl: urls.realestateUrl || null,
             domainUrl: urls.domainUrl || null,
             status: status || null,
+            listId: selectedListId || null,
         };
 
         try {
@@ -285,6 +316,23 @@ function AddPropertyForm() {
                         ))}
                     </select>
                 </label>
+
+                {propertyLists.length > 0 && (
+                    <label className="flex flex-col gap-1">
+                        <span className={label_class}>{is_retro ? "MISSION" : "List"}</span>
+                        <select
+                            value={selectedListId}
+                            onChange={(e) => setSelectedListId(e.target.value)}
+                            className={input_class}
+                        >
+                            {propertyLists.map((list) => (
+                                <option key={list.id} value={list.id}>
+                                    {is_retro ? list.name.toUpperCase() : list.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                )}
 
                 {profiles.length > 0 && (
                     <div className="flex flex-col gap-1">

@@ -29,6 +29,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if ("realestateUrl" in body) updates.realestate_url = body.realestateUrl;
     if ("domainUrl" in body) updates.domain_url = body.domainUrl;
     if ("sourceUrl" in body) updates.source_url = body.sourceUrl;
+    if ("listId" in body) updates.list_id = body.listId;
 
     if (Object.keys(updates).length === 0) {
         return Response.json({ ok: false, error: "No fields to update" }, { status: 400 });
