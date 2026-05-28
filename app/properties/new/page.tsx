@@ -13,6 +13,9 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
 
 const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
+const THEME_KEY = "house-tracker-theme";
+
+type Theme = "default" | "retro";
 
 type Profile = {
     id: string;
@@ -43,6 +46,7 @@ function AddPropertyForm() {
     const search_params = useSearchParams();
     const router = useRouter();
 
+    const [theme, setTheme] = useState<Theme>("default");
     const [listing_url, setListingUrl] = useState("");
     const [title, setTitle] = useState("");
     const [suburb, setSuburb] = useState("");
@@ -55,6 +59,21 @@ function AddPropertyForm() {
     const [active_profile_id, setActiveProfileId] = useState("");
     const [ranking, setRanking] = useState(5);
     const [error, setError] = useState<string | null>(null);
+
+    // Theme management
+    useEffect(() => {
+        const stored = localStorage.getItem(THEME_KEY) as Theme | null;
+        if (stored === "retro" || stored === "default") {
+            setTheme(stored);
+        }
+        document.documentElement.setAttribute("data-theme", stored ?? "default");
+    }, []);
+
+    useEffect(() => {
+        document.documentElement.setAttribute("data-theme", theme);
+    }, [theme]);
+
+    const is_retro = theme === "retro";
 
     // Read query params and prefill
     useEffect(() => {
@@ -144,26 +163,31 @@ function AddPropertyForm() {
         }
     }
 
+    const input_class = is_retro ? "retro-input w-full rounded px-3 py-3" : "rounded border p-3";
+    const label_class = is_retro ? "retro-label" : "text-sm font-medium";
+
     return (
-        <main className="mx-auto flex w-full max-w-lg flex-col gap-5 p-4 md:p-8">
+        <main className={`mx-auto flex w-full max-w-lg flex-col gap-5 p-4 md:p-8 ${is_retro ? "font-mono" : ""}`}>
             <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold">Add Property</h1>
-                <a href="/" className="rounded border px-3 py-2 text-sm">
+                <h1 className={`text-2xl font-bold ${is_retro ? "tracking-widest" : ""}`} style={is_retro ? { color: "var(--retro-accent)" } : undefined}>
+                    {is_retro ? "[ ADD PROPERTY ]" : "Add Property"}
+                </h1>
+                <a href="/" className={is_retro ? "retro-btn rounded px-3 py-2 text-xs" : "rounded border px-3 py-2 text-sm"}>
                     &larr; Back
                 </a>
             </div>
 
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p className="text-sm" style={is_retro ? { color: "#d96c6c" } : { color: "rgb(220 38 38)" }}>{error}</p>}
 
             <div className="flex flex-col gap-3">
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Listing URL</span>
+                    <span className={label_class}>Listing URL</span>
                     <input
                         type="url"
                         value={listing_url}
                         onChange={(e) => setListingUrl(e.target.value)}
                         placeholder="https://www.realestate.com.au/property-..."
-                        className="rounded border p-3"
+                        className={input_class}
                     />
                 </label>
 
@@ -172,87 +196,87 @@ function AddPropertyForm() {
                         href={listing_url.trim()}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded bg-blue-600 px-4 py-2 text-sm text-white"
+                        className={is_retro ? "retro-link inline-flex items-center gap-1 rounded border px-4 py-2 text-xs" : "inline-flex items-center gap-1 rounded bg-blue-600 px-4 py-2 text-sm text-white"}
                     >
                         Open Listing &rarr;
                     </a>
                 )}
 
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Address / Title</span>
+                    <span className={label_class}>Address / Title</span>
                     <input
                         type="text"
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
                         placeholder="e.g. 42 Smith St, Newtown"
-                        className="rounded border p-3"
+                        className={input_class}
                     />
                 </label>
 
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Suburb</span>
+                    <span className={label_class}>Suburb</span>
                     <input
                         type="text"
                         value={suburb}
                         onChange={(e) => setSuburb(e.target.value)}
                         placeholder="e.g. Newtown"
-                        className="rounded border p-3"
+                        className={input_class}
                     />
                 </label>
 
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Price Guide</span>
+                    <span className={label_class}>Price Guide</span>
                     <input
                         type="text"
                         value={price_guide}
                         onChange={(e) => setPriceGuide(e.target.value)}
                         placeholder="e.g. $1,200,000 - $1,300,000"
-                        className="rounded border p-3"
+                        className={input_class}
                     />
                 </label>
 
                 <div className="grid grid-cols-3 gap-2">
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium">Beds</span>
+                        <span className={label_class}>Beds</span>
                         <input
                             type="number"
                             min={0}
                             value={beds}
                             onChange={(e) => setBeds(e.target.value)}
                             placeholder="0"
-                            className="rounded border p-3"
+                            className={input_class}
                         />
                     </label>
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium">Baths</span>
+                        <span className={label_class}>Baths</span>
                         <input
                             type="number"
                             min={0}
                             value={baths}
                             onChange={(e) => setBaths(e.target.value)}
                             placeholder="0"
-                            className="rounded border p-3"
+                            className={input_class}
                         />
                     </label>
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium">Cars</span>
+                        <span className={label_class}>Cars</span>
                         <input
                             type="number"
                             min={0}
                             value={cars}
                             onChange={(e) => setCars(e.target.value)}
                             placeholder="0"
-                            className="rounded border p-3"
+                            className={input_class}
                         />
                     </label>
                 </div>
 
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Status</span>
+                    <span className={label_class}>Status</span>
                     <select
                         value={status}
                         onChange={(e) => setStatus(e.target.value)}
-                        className="rounded border p-3"
+                        className={input_class}
                     >
                         {STATUS_OPTIONS.map((opt) => (
                             <option key={opt.value} value={opt.value}>
@@ -264,7 +288,7 @@ function AddPropertyForm() {
 
                 {profiles.length > 0 && (
                     <div className="flex flex-col gap-1">
-                        <span className="text-sm font-medium">
+                        <span className={label_class}>
                             Your Ranking ({profiles.find((p) => p.id === active_profile_id)?.name ?? "Default"})
                         </span>
                         <div className="flex items-center gap-2">
@@ -284,9 +308,9 @@ function AddPropertyForm() {
                 <button
                     onClick={() => void handle_save()}
                     disabled={saving}
-                    className="mt-2 rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700 disabled:opacity-50"
+                    className={is_retro ? "retro-btn-primary mt-2 rounded px-4 py-3 text-base tracking-wider disabled:opacity-50" : "mt-2 rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700 disabled:opacity-50"}
                 >
-                    {saving ? "Saving..." : "Save Property"}
+                    {saving ? (is_retro ? "SAVING..." : "Saving...") : (is_retro ? "[ SAVE PROPERTY ]" : "Save Property")}
                 </button>
             </div>
         </main>
