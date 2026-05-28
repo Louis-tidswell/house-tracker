@@ -28,6 +28,19 @@ type Profile = {
 type Coordinates = Record<string, { lat: number; lon: number }>;
 
 type Theme = "default" | "retro";
+type Tab = "active" | "archived";
+
+type EditDraft = {
+  title: string;
+  address: string;
+  suburb: string;
+  bedrooms: string;
+  bathrooms: string;
+  carSpaces: string;
+  priceText: string;
+  realestateUrl: string;
+  domainUrl: string;
+};
 
 const COORDS_STORAGE_KEY = "house-tracker-coordinates-v1";
 const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
@@ -54,6 +67,11 @@ export default function Home() {
   const [filterMinCars, setFilterMinCars] = useState("");
   const [filterPrice, setFilterPrice] = useState("");
   const [sortBy, setSortBy] = useState<"priority" | "beds" | "baths" | "cars" | "price">("priority");
+
+  const [activeTab, setActiveTab] = useState<Tab>("active");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
   const notes_timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -193,8 +211,13 @@ export default function Home() {
     return numberMatch ? Number(numberMatch[0]) : Number.MAX_SAFE_INTEGER;
   }
 
+  // Separate active vs archived
+  const activeProperties = saved.filter((p) => p.status !== "archived");
+  const archivedProperties = saved.filter((p) => p.status === "archived");
+
   const sorted = useMemo(() => {
-    const clone = [...saved];
+    const source = activeTab === "active" ? activeProperties : archivedProperties;
+    const clone = [...source];
     clone.sort((a, b) => {
       if (sortBy === "beds") return (b.bedrooms ?? -1) - (a.bedrooms ?? -1);
       if (sortBy === "baths") return (b.bathrooms ?? -1) - (a.bathrooms ?? -1);
@@ -203,7 +226,7 @@ export default function Home() {
       return getPriority(b) - getPriority(a);
     });
     return clone;
-  }, [saved, sortBy, getPriority]);
+  }, [saved, sortBy, getPriority, activeTab]);
 
   function matchesFilters(property: SavedProperty): boolean {
     const minBeds = filterMinBeds ? Number(filterMinBeds) : 0;
@@ -225,7 +248,76 @@ export default function Home() {
   function removeProperty(id: string) {
     setSaved((prev) => prev.filter((item) => item.id !== id));
     if (selectedId === id) setSelectedId(null);
+    setConfirmDeleteId(null);
     void fetch(`/api/properties/${id}`, { method: "DELETE" });
+  }
+
+  function archiveProperty(id: string) {
+    setSaved((prev) => prev.map((p) => p.id === id ? { ...p, status: "archived" } : p));
+    if (selectedId === id) setSelectedId(null);
+    void fetch(`/api/properties/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "archived" }),
+    });
+  }
+
+  function unarchiveProperty(id: string) {
+    setSaved((prev) => prev.map((p) => p.id === id ? { ...p, status: null } : p));
+    void fetch(`/api/properties/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: null }),
+    });
+  }
+
+  function startEditing(property: SavedProperty) {
+    setEditingId(property.id);
+    setEditDraft({
+      title: property.title ?? "",
+      address: property.address ?? "",
+      suburb: property.suburb ?? "",
+      bedrooms: property.bedrooms?.toString() ?? "",
+      bathrooms: property.bathrooms?.toString() ?? "",
+      carSpaces: property.carSpaces?.toString() ?? "",
+      priceText: property.priceText ?? "",
+      realestateUrl: property.realestateUrl ?? "",
+      domainUrl: property.domainUrl ?? "",
+    });
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setEditDraft(null);
+  }
+
+  function saveEdit(propertyId: string) {
+    if (!editDraft) return;
+
+    const updates = {
+      title: editDraft.title || null,
+      address: editDraft.address || null,
+      suburb: editDraft.suburb || null,
+      bedrooms: editDraft.bedrooms ? Number(editDraft.bedrooms) : null,
+      bathrooms: editDraft.bathrooms ? Number(editDraft.bathrooms) : null,
+      carSpaces: editDraft.carSpaces ? Number(editDraft.carSpaces) : null,
+      priceText: editDraft.priceText || null,
+      realestateUrl: editDraft.realestateUrl || null,
+      domainUrl: editDraft.domainUrl || null,
+    };
+
+    setSaved((prev) => prev.map((p) =>
+      p.id === propertyId ? { ...p, ...updates } : p
+    ));
+
+    setEditingId(null);
+    setEditDraft(null);
+
+    void fetch(`/api/properties/${propertyId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(updates),
+    });
   }
 
   function commitPriority(propertyId: string) {
@@ -346,6 +438,61 @@ export default function Home() {
     );
   }
 
+  // ─── Shared edit form renderer ───
+  function renderEditForm(property: SavedProperty) {
+    if (!editDraft) return null;
+    const input_class = is_retro ? "retro-input w-full rounded px-2 py-1.5 text-xs" : "w-full rounded border p-2 text-sm";
+    const label_class = is_retro ? "retro-label" : "text-xs font-medium text-zinc-500";
+    const btn_class = is_retro ? "retro-btn rounded px-3 py-1.5 text-xs" : "rounded border px-3 py-1 text-sm";
+
+    return (
+      <div className="space-y-2 mt-2" onClick={(e) => e.stopPropagation()}>
+        <div className="grid gap-2 grid-cols-2">
+          <div>
+            <p className={label_class}>Title</p>
+            <input value={editDraft.title} onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })} className={input_class} />
+          </div>
+          <div>
+            <p className={label_class}>Price</p>
+            <input value={editDraft.priceText} onChange={(e) => setEditDraft({ ...editDraft, priceText: e.target.value })} className={input_class} />
+          </div>
+          <div>
+            <p className={label_class}>Address</p>
+            <input value={editDraft.address} onChange={(e) => setEditDraft({ ...editDraft, address: e.target.value })} className={input_class} />
+          </div>
+          <div>
+            <p className={label_class}>Suburb</p>
+            <input value={editDraft.suburb} onChange={(e) => setEditDraft({ ...editDraft, suburb: e.target.value })} className={input_class} />
+          </div>
+          <div>
+            <p className={label_class}>Bedrooms</p>
+            <input type="number" value={editDraft.bedrooms} onChange={(e) => setEditDraft({ ...editDraft, bedrooms: e.target.value })} className={input_class} />
+          </div>
+          <div>
+            <p className={label_class}>Bathrooms</p>
+            <input type="number" value={editDraft.bathrooms} onChange={(e) => setEditDraft({ ...editDraft, bathrooms: e.target.value })} className={input_class} />
+          </div>
+          <div>
+            <p className={label_class}>Car Spaces</p>
+            <input type="number" value={editDraft.carSpaces} onChange={(e) => setEditDraft({ ...editDraft, carSpaces: e.target.value })} className={input_class} />
+          </div>
+        </div>
+        <div>
+          <p className={label_class}>Realestate URL</p>
+          <input value={editDraft.realestateUrl} onChange={(e) => setEditDraft({ ...editDraft, realestateUrl: e.target.value })} className={input_class} />
+        </div>
+        <div>
+          <p className={label_class}>Domain URL</p>
+          <input value={editDraft.domainUrl} onChange={(e) => setEditDraft({ ...editDraft, domainUrl: e.target.value })} className={input_class} />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={() => saveEdit(property.id)} className={`${btn_class} ${is_retro ? "" : "bg-black text-white"}`}>Save</button>
+          <button onClick={cancelEditing} className={btn_class}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
   // ─── DEFAULT THEME RENDER ───
 
   if (!is_retro) {
@@ -392,55 +539,94 @@ export default function Home() {
           <button onClick={clearFilters} className="mt-2 rounded border px-3 py-2">Clear Filters</button>
         </section>
 
+        {/* Tabs */}
+        <div className="flex gap-2 border-b pb-1">
+          <button onClick={() => setActiveTab("active")} className={`rounded-t px-4 py-2 text-sm font-medium ${activeTab === "active" ? "border-b-2 border-black" : "text-zinc-500"}`}>
+            Active ({activeProperties.length})
+          </button>
+          <button onClick={() => setActiveTab("archived")} className={`rounded-t px-4 py-2 text-sm font-medium ${activeTab === "archived" ? "border-b-2 border-black" : "text-zinc-500"}`}>
+            Archived ({archivedProperties.length})
+          </button>
+        </div>
+
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="space-y-3">
-            <h2 className="text-xl font-semibold">Saved Properties ({sorted.length})</h2>
+            <h2 className="text-xl font-semibold">
+              {activeTab === "active" ? `Saved Properties (${sorted.length})` : `Archived (${sorted.length})`}
+            </h2>
             {[...matched, ...unmatched].map((property, index) => {
               const isMatched = index < matched.length;
+              const isEditing = editingId === property.id;
               return (
                 <article key={property.id} ref={(node) => { cardRefs.current[property.id] = node; }} className={`rounded border p-3 ${!isMatched ? "opacity-45" : ""} ${selected?.id === property.id ? "ring-2 ring-black" : ""}`} onClick={() => setSelectedId(property.id)}>
-                  <h3 className="font-medium">{property.title ?? "Untitled property"}</h3>
-                  <p className="text-sm text-zinc-600">{property.address ?? property.sourceUrl}</p>
-                  <p className="text-sm">{property.bedrooms ?? "?"} bed | {property.bathrooms ?? "?"} bath | {property.carSpaces ?? "?"} car</p>
-                  <p className="text-sm">{property.priceText ?? "No price"}</p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-sm">
-                    {property.realestateUrl ? <a href={property.realestateUrl} target="_blank" rel="noreferrer" className="rounded border px-2 py-1">Open realestate link</a> : null}
-                    {property.domainUrl ? <a href={property.domainUrl} target="_blank" rel="noreferrer" className="rounded border px-2 py-1">Open Domain link</a> : null}
-                  </div>
-                  <div className="mt-2 rounded border p-2 text-sm">
-                    <p className="mb-1 font-medium">Priorities</p>
-                    {priorityProfiles.map((profile) => {
-                      const isActive = profile.id === activeProfileId;
-                      const current = isActive ? getPriority(property) : (property.rankings[profile.id] ?? 5);
-                      return (
-                        <div key={profile.id} className="mb-1">
-                          <div className="flex items-center justify-between">
-                            <span>{profile.name}</span>
-                            <span>{current}/10</span>
-                          </div>
-                          {isActive ? (
-                            <input type="range" min={1} max={10} value={current}
-                              onChange={(event) => setDraftPriority((prev) => ({ ...prev, [property.id]: Number(event.target.value) }))}
-                              onMouseUp={() => commitPriority(property.id)}
-                              onTouchEnd={() => commitPriority(property.id)}
-                              onKeyUp={() => commitPriority(property.id)}
-                              className="w-full" />
-                          ) : (
-                            <div className="h-2 w-full rounded bg-zinc-200">
-                              <div className="h-2 rounded bg-zinc-400" style={{ width: `${(current / 10) * 100}%` }} />
+                  {isEditing ? (
+                    <>
+                      <h3 className="font-medium text-blue-700">Editing Property</h3>
+                      {renderEditForm(property)}
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="font-medium">{property.title ?? "Untitled property"}</h3>
+                      <p className="text-sm text-zinc-600">{property.address ?? property.sourceUrl}</p>
+                      <p className="text-sm">{property.bedrooms ?? "?"} bed | {property.bathrooms ?? "?"} bath | {property.carSpaces ?? "?"} car</p>
+                      <p className="text-sm">{property.priceText ?? "No price"}</p>
+                      <div className="mt-2 flex flex-wrap gap-2 text-sm">
+                        {property.realestateUrl ? <a href={property.realestateUrl} target="_blank" rel="noreferrer" className="rounded border px-2 py-1">Open realestate link</a> : null}
+                        {property.domainUrl ? <a href={property.domainUrl} target="_blank" rel="noreferrer" className="rounded border px-2 py-1">Open Domain link</a> : null}
+                      </div>
+                      <div className="mt-2 rounded border p-2 text-sm">
+                        <p className="mb-1 font-medium">Priorities</p>
+                        {priorityProfiles.map((profile) => {
+                          const isActive = profile.id === activeProfileId;
+                          const current = isActive ? getPriority(property) : (property.rankings[profile.id] ?? 5);
+                          return (
+                            <div key={profile.id} className="mb-1">
+                              <div className="flex items-center justify-between">
+                                <span>{profile.name}</span>
+                                <span>{current}/10</span>
+                              </div>
+                              {isActive ? (
+                                <input type="range" min={1} max={10} value={current}
+                                  onChange={(event) => setDraftPriority((prev) => ({ ...prev, [property.id]: Number(event.target.value) }))}
+                                  onMouseUp={() => commitPriority(property.id)}
+                                  onTouchEnd={() => commitPriority(property.id)}
+                                  onKeyUp={() => commitPriority(property.id)}
+                                  className="w-full" />
+                              ) : (
+                                <div className="h-2 w-full rounded bg-zinc-200">
+                                  <div className="h-2 rounded bg-zinc-400" style={{ width: `${(current / 10) * 100}%` }} />
+                                </div>
+                              )}
                             </div>
-                          )}
+                          );
+                        })}
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex gap-2">
+                          <button onClick={() => ensureAuthorPrefix(property.id)} className="rounded border px-3 py-1 text-sm">Insert My Name</button>
                         </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-2 space-y-2">
-                    <div className="flex gap-2">
-                      <button onClick={() => ensureAuthorPrefix(property.id)} className="rounded border px-3 py-1 text-sm">Insert My Name</button>
-                    </div>
-                    <textarea value={property.notes} onChange={(event) => update_notes(property.id, event.target.value)} className="w-full rounded border p-2 text-sm" rows={5} placeholder="Shared notes (editable by everyone)" />
-                  </div>
-                  <button onClick={() => removeProperty(property.id)} className="mt-2 text-sm text-red-600">Remove</button>
+                        <textarea value={property.notes} onChange={(event) => update_notes(property.id, event.target.value)} className="w-full rounded border p-2 text-sm" rows={5} placeholder="Shared notes (editable by everyone)" />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button onClick={(e) => { e.stopPropagation(); startEditing(property); }} className="text-sm text-blue-600">Edit</button>
+                        {activeTab === "active" && (
+                          <button onClick={(e) => { e.stopPropagation(); archiveProperty(property.id); }} className="text-sm text-amber-600">Archive</button>
+                        )}
+                        {activeTab === "archived" && (
+                          <button onClick={(e) => { e.stopPropagation(); unarchiveProperty(property.id); }} className="text-sm text-green-600">Unarchive</button>
+                        )}
+                        {confirmDeleteId === property.id ? (
+                          <span className="flex items-center gap-1 text-sm">
+                            <span className="text-red-600">Delete?</span>
+                            <button onClick={(e) => { e.stopPropagation(); removeProperty(property.id); }} className="font-bold text-red-600">Yes</button>
+                            <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }} className="text-zinc-500">No</button>
+                          </span>
+                        ) : (
+                          <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(property.id); }} className="text-sm text-red-600">Remove</button>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </article>
               );
             })}
@@ -566,15 +752,44 @@ export default function Home() {
         <button onClick={clearFilters} className="retro-btn mt-3 rounded px-3 py-1.5 text-xs">CLEAR FILTERS</button>
       </section>
 
+      {/* Tabs */}
+      <div className="flex gap-1">
+        <button
+          onClick={() => setActiveTab("active")}
+          className={`rounded-t px-4 py-2 text-xs font-bold tracking-wider border ${activeTab === "active" ? "border-b-0" : "opacity-50"}`}
+          style={{
+            borderColor: "var(--retro-border)",
+            color: activeTab === "active" ? "var(--retro-accent)" : "var(--retro-text-dim)",
+            background: activeTab === "active" ? "var(--retro-panel)" : "transparent",
+          }}
+        >
+          ACTIVE ({activeProperties.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("archived")}
+          className={`rounded-t px-4 py-2 text-xs font-bold tracking-wider border ${activeTab === "archived" ? "border-b-0" : "opacity-50"}`}
+          style={{
+            borderColor: "var(--retro-border)",
+            color: activeTab === "archived" ? "var(--retro-amber)" : "var(--retro-text-dim)",
+            background: activeTab === "archived" ? "var(--retro-panel)" : "transparent",
+          }}
+        >
+          ARCHIVED ({archivedProperties.length})
+        </button>
+      </div>
+
       {/* Main grid */}
       <div className="grid gap-6 lg:grid-cols-2">
 
         {/* Property cards */}
         <section className="space-y-4">
-          <p className="retro-heading">DATA READOUT — {sorted.length} PROPERTIES</p>
+          <p className="retro-heading">
+            {activeTab === "active" ? `DATA READOUT — ${sorted.length} PROPERTIES` : `ARCHIVE — ${sorted.length} STORED`}
+          </p>
           {[...matched, ...unmatched].map((property, index) => {
             const isMatched = index < matched.length;
             const isSelected = selected?.id === property.id;
+            const isEditing = editingId === property.id;
             return (
               <article
                 key={property.id}
@@ -582,86 +797,113 @@ export default function Home() {
                 className={`retro-card rounded p-4 cursor-pointer ${!isMatched ? "opacity-40" : ""} ${isSelected ? "retro-card-selected" : ""}`}
                 onClick={() => setSelectedId(property.id)}
               >
-                {/* Title row */}
-                <h3 className="text-sm font-bold" style={{ color: "var(--retro-accent)" }}>
-                  {property.title ?? "UNTITLED PROPERTY"}
-                </h3>
-                <p className="mt-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>
-                  {property.address ?? property.sourceUrl}
-                </p>
+                {isEditing ? (
+                  <>
+                    <h3 className="text-sm font-bold" style={{ color: "var(--retro-amber)" }}>EDITING PROPERTY</h3>
+                    {renderEditForm(property)}
+                  </>
+                ) : (
+                  <>
+                    {/* Title row */}
+                    <h3 className="text-sm font-bold" style={{ color: "var(--retro-accent)" }}>
+                      {property.title ?? "UNTITLED PROPERTY"}
+                    </h3>
+                    <p className="mt-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>
+                      {property.address ?? property.sourceUrl}
+                    </p>
 
-                <div className="retro-separator" />
+                    <div className="retro-separator" />
 
-                {/* Price */}
-                <p className="text-sm font-bold" style={{ color: "var(--retro-amber)" }}>
-                  {property.priceText ?? "Price TBD"}
-                </p>
+                    {/* Price */}
+                    <p className="text-sm font-bold" style={{ color: "var(--retro-amber)" }}>
+                      {property.priceText ?? "Price TBD"}
+                    </p>
 
-                {/* Stats row */}
-                <div className="mt-2 flex gap-4 text-xs" style={{ color: "var(--foreground)" }}>
-                  <span>{property.bedrooms ?? "?"} BED</span>
-                  <span>{property.bathrooms ?? "?"} BATH</span>
-                  <span>{property.carSpaces ?? "?"} CAR</span>
-                </div>
+                    {/* Stats row */}
+                    <div className="mt-2 flex gap-4 text-xs" style={{ color: "var(--foreground)" }}>
+                      <span>{property.bedrooms ?? "?"} BED</span>
+                      <span>{property.bathrooms ?? "?"} BATH</span>
+                      <span>{property.carSpaces ?? "?"} CAR</span>
+                    </div>
 
-                <div className="retro-separator" />
+                    <div className="retro-separator" />
 
-                {/* Links */}
-                {(property.realestateUrl || property.domainUrl) && (
-                  <div className="flex flex-wrap gap-2 text-xs mb-2">
-                    {property.realestateUrl && <a href={property.realestateUrl} target="_blank" rel="noreferrer" className="retro-link rounded border px-2 py-1">REALESTATE</a>}
-                    {property.domainUrl && <a href={property.domainUrl} target="_blank" rel="noreferrer" className="retro-link rounded border px-2 py-1">DOMAIN</a>}
-                  </div>
-                )}
-
-                {/* Priority / Calibration */}
-                <div className="retro-panel rounded p-3 mt-2">
-                  <p className="retro-heading mb-2">CALIBRATION</p>
-                  {priorityProfiles.map((profile) => {
-                    const isActive = profile.id === activeProfileId;
-                    const current = isActive ? getPriority(property) : (property.rankings[profile.id] ?? 5);
-                    return (
-                      <div key={profile.id} className="mb-2">
-                        <div className="flex items-center justify-between text-xs mb-0.5">
-                          <span style={{ color: isActive ? "var(--retro-accent)" : "var(--retro-text-dim)" }}>
-                            {profile.name.toUpperCase()}
-                          </span>
-                          <span style={{ color: "var(--retro-amber)" }}>{current}/10</span>
-                        </div>
-                        {isActive ? (
-                          <input type="range" min={1} max={10} value={current}
-                            onChange={(event) => setDraftPriority((prev) => ({ ...prev, [property.id]: Number(event.target.value) }))}
-                            onMouseUp={() => commitPriority(property.id)}
-                            onTouchEnd={() => commitPriority(property.id)}
-                            onKeyUp={() => commitPriority(property.id)}
-                            className="w-full" />
-                        ) : (
-                          <div className="h-1.5 w-full" style={{ background: "var(--retro-panel)", border: "1px solid var(--retro-border)" }}>
-                            <div className="h-full" style={{ width: `${(current / 10) * 100}%`, background: "var(--retro-muted)" }} />
-                          </div>
-                        )}
+                    {/* Links */}
+                    {(property.realestateUrl || property.domainUrl) && (
+                      <div className="flex flex-wrap gap-2 text-xs mb-2">
+                        {property.realestateUrl && <a href={property.realestateUrl} target="_blank" rel="noreferrer" className="retro-link rounded border px-2 py-1">REALESTATE</a>}
+                        {property.domainUrl && <a href={property.domainUrl} target="_blank" rel="noreferrer" className="retro-link rounded border px-2 py-1">DOMAIN</a>}
                       </div>
-                    );
-                  })}
-                </div>
+                    )}
 
-                <div className="retro-separator" />
+                    {/* Priority / Calibration */}
+                    <div className="retro-panel rounded p-3 mt-2">
+                      <p className="retro-heading mb-2">CALIBRATION</p>
+                      {priorityProfiles.map((profile) => {
+                        const isActive = profile.id === activeProfileId;
+                        const current = isActive ? getPriority(property) : (property.rankings[profile.id] ?? 5);
+                        return (
+                          <div key={profile.id} className="mb-2">
+                            <div className="flex items-center justify-between text-xs mb-0.5">
+                              <span style={{ color: isActive ? "var(--retro-accent)" : "var(--retro-text-dim)" }}>
+                                {profile.name.toUpperCase()}
+                              </span>
+                              <span style={{ color: "var(--retro-amber)" }}>{current}/10</span>
+                            </div>
+                            {isActive ? (
+                              <input type="range" min={1} max={10} value={current}
+                                onChange={(event) => setDraftPriority((prev) => ({ ...prev, [property.id]: Number(event.target.value) }))}
+                                onMouseUp={() => commitPriority(property.id)}
+                                onTouchEnd={() => commitPriority(property.id)}
+                                onKeyUp={() => commitPriority(property.id)}
+                                className="w-full" />
+                            ) : (
+                              <div className="h-1.5 w-full" style={{ background: "var(--retro-panel)", border: "1px solid var(--retro-border)" }}>
+                                <div className="h-full" style={{ width: `${(current / 10) * 100}%`, background: "var(--retro-muted)" }} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                {/* Notes */}
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <button onClick={() => ensureAuthorPrefix(property.id)} className="retro-btn rounded px-2 py-1 text-xs">INSERT NAME</button>
-                  </div>
-                  <textarea
-                    value={property.notes}
-                    onChange={(event) => update_notes(property.id, event.target.value)}
-                    className="retro-input w-full rounded p-2 text-xs"
-                    rows={4}
-                    placeholder="Shared notes..."
-                  />
-                </div>
+                    <div className="retro-separator" />
 
-                <button onClick={() => removeProperty(property.id)} className="retro-danger retro-btn mt-2 rounded px-2 py-1 text-xs">REMOVE</button>
+                    {/* Notes */}
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <button onClick={() => ensureAuthorPrefix(property.id)} className="retro-btn rounded px-2 py-1 text-xs">INSERT NAME</button>
+                      </div>
+                      <textarea
+                        value={property.notes}
+                        onChange={(event) => update_notes(property.id, event.target.value)}
+                        className="retro-input w-full rounded p-2 text-xs"
+                        rows={4}
+                        placeholder="Shared notes..."
+                      />
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button onClick={(e) => { e.stopPropagation(); startEditing(property); }} className="retro-btn rounded px-2 py-1 text-xs">EDIT</button>
+                      {activeTab === "active" && (
+                        <button onClick={(e) => { e.stopPropagation(); archiveProperty(property.id); }} className="retro-btn rounded px-2 py-1 text-xs" style={{ color: "var(--retro-amber)" }}>ARCHIVE</button>
+                      )}
+                      {activeTab === "archived" && (
+                        <button onClick={(e) => { e.stopPropagation(); unarchiveProperty(property.id); }} className="retro-btn rounded px-2 py-1 text-xs" style={{ color: "var(--retro-accent)" }}>UNARCHIVE</button>
+                      )}
+                      {confirmDeleteId === property.id ? (
+                        <span className="flex items-center gap-1 text-xs">
+                          <span style={{ color: "#d96c6c" }}>DELETE?</span>
+                          <button onClick={(e) => { e.stopPropagation(); removeProperty(property.id); }} className="retro-btn rounded px-2 py-0.5 text-xs font-bold" style={{ color: "#d96c6c" }}>YES</button>
+                          <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }} className="retro-btn rounded px-2 py-0.5 text-xs" style={{ color: "var(--retro-text-dim)" }}>NO</button>
+                        </span>
+                      ) : (
+                        <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(property.id); }} className="retro-danger retro-btn rounded px-2 py-1 text-xs">REMOVE</button>
+                      )}
+                    </div>
+                  </>
+                )}
               </article>
             );
           })}
