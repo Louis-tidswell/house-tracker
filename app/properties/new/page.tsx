@@ -8,7 +8,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
 
@@ -69,6 +69,59 @@ function AddPropertyForm() {
     const [error, setError] = useState<string | null>(null);
     const [propertyLists, setPropertyLists] = useState<PropertyList[]>([]);
     const [selectedListId, setSelectedListId] = useState("");
+    const [autoFilling, setAutoFilling] = useState(false);
+    const [autoFillMessage, setAutoFillMessage] = useState<string | null>(null);
+    const [autoFillFailed, setAutoFillFailed] = useState(false);
+    const autoFillRequest = useRef(0);
+    const autoFillController = useRef<AbortController | null>(null);
+
+    useEffect(() => () => { autoFillController.current?.abort(); }, []);
+
+    async function handleAutoFill() {
+        if (!listing_url.trim() || autoFilling || saving) return;
+        const requestId = ++autoFillRequest.current;
+        const controller = new AbortController();
+        autoFillController.current?.abort();
+        autoFillController.current = controller;
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        setAutoFilling(true);
+        setAutoFillMessage(null);
+        setAutoFillFailed(false);
+        try {
+            const response = await fetch("/api/listing-extraction", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ url: listing_url.trim() }),
+                signal: controller.signal,
+            });
+            const result = await response.json();
+            if (requestId !== autoFillRequest.current) return;
+            if (!response.ok || !result.ok || !result.property) {
+                throw new Error(result.message || "Failed to fill. No listing details were found. Please enter them manually.");
+            }
+            const property = result.property;
+            const text = (value: unknown): string | null => typeof value === "string" && value.trim() ? value.trim() : null;
+            const count = (value: unknown): string | null => typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100 ? String(value) : null;
+            const fields = [
+                { value: text(property.address) ?? text(property.title), set: setTitle },
+                { value: text(property.suburb), set: setSuburb },
+                { value: text(property.priceText), set: setPriceGuide },
+                { value: count(property.bedrooms), set: setBeds },
+                { value: count(property.bathrooms), set: setBaths },
+                { value: count(property.carSpaces), set: setCars },
+            ].filter((field) => field.value !== null);
+            if (!fields.length) throw new Error("Failed to fill. No listing details were found. Please enter them manually.");
+            fields.forEach(({ value, set }) => set((current) => current.trim() ? current : value!));
+            setAutoFillMessage("Listing read. Available details filled into empty fields; existing entries kept. Review before saving.");
+        } catch (error) {
+            if (requestId !== autoFillRequest.current) return;
+            setAutoFillFailed(true);
+            setAutoFillMessage(error instanceof Error && error.name !== "AbortError" ? error.message : "Failed to fill. The request timed out. Please enter the details manually.");
+        } finally {
+            clearTimeout(timeout);
+            if (requestId === autoFillRequest.current) setAutoFilling(false);
+        }
+    }
 
     // Theme management
     useEffect(() => {
@@ -148,6 +201,9 @@ function AddPropertyForm() {
     const [saving, setSaving] = useState(false);
 
     async function handle_save() {
+        autoFillController.current?.abort();
+        ++autoFillRequest.current;
+        setAutoFilling(false);
         if (!title.trim() && !listing_url.trim()) {
             setError("Enter at least a title or listing URL.");
             return;
@@ -216,11 +272,36 @@ function AddPropertyForm() {
                     <input
                         type="url"
                         value={listing_url}
-                        onChange={(e) => setListingUrl(e.target.value)}
+                        onChange={(e) => {
+                            autoFillController.current?.abort();
+                            ++autoFillRequest.current;
+                            setAutoFilling(false);
+                            setAutoFillMessage(null);
+                            setListingUrl(e.target.value);
+                        }}
                         placeholder="https://www.realestate.com.au/property-..."
                         className={input_class}
                     />
                 </label>
+
+                {listing_url.trim() && (
+                    <div className="space-y-2">
+                        <button
+                            type="button"
+                            onClick={() => void handleAutoFill()}
+                            disabled={autoFilling || saving}
+                            className={is_retro ? "retro-btn rounded px-4 py-2 text-xs disabled:opacity-50" : "rounded border px-4 py-2 text-sm disabled:opacity-50"}
+                        >
+                            {autoFilling ? (is_retro ? "FILLING..." : "Filling...") : (is_retro ? "AUTO FILL" : "Auto fill")}
+                        </button>
+                        <p className="text-xs" style={{ color: is_retro ? "var(--retro-text-dim)" : "#52525b" }}>Optional · realestate.com.au listings · fills empty fields only</p>
+                    </div>
+                )}
+                {autoFillMessage && (
+                    <p role={autoFillFailed ? "alert" : "status"} className="text-sm" style={{ color: autoFillFailed ? (is_retro ? "var(--retro-danger)" : "#dc2626") : (is_retro ? "var(--retro-accent)" : "#166534") }}>
+                        {autoFillMessage}
+                    </p>
+                )}
 
                 {listing_url.trim() && (
                     <a

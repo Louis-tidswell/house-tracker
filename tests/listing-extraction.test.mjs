@@ -5,16 +5,16 @@ import { extractListingHtml, extractListingText, fetchListing, SAMPLE_URL } from
 
 const header = readFileSync(new URL("./fixtures/rea-151406888-header.txt", import.meta.url), "utf8");
 
-test("extracts the supplied listing's header from a captured readable-text excerpt", () => {
+test("extracts the captured header but leaves its unlabelled counts unknown", () => {
   const property = extractListingText(header);
   assert.equal(property.listingId, "151406888");
   assert.equal(property.address, "2204/21 Upper Clifton Terrace, Red Hill, Qld 4059");
   assert.equal(property.suburb, "Red Hill");
   assert.equal(property.propertyType, "Unit");
   assert.equal(property.priceText, "Offers from $699,000");
-  assert.equal(property.bedrooms, 1);
-  assert.equal(property.bathrooms, 1);
-  assert.equal(property.carSpaces, 1);
+  assert.equal(property.bedrooms, null);
+  assert.equal(property.bathrooms, null);
+  assert.equal(property.carSpaces, null);
 });
 
 test("parses an HTML listing header without executing scripts", () => {
@@ -27,7 +27,7 @@ test("parses an HTML listing header without executing scripts", () => {
 });
 
 test("extracts structured metadata from a synthetic JSON-LD fixture", () => {
-  const data = { "@type": "Apartment", address: { streetAddress: "1 Test Street", addressLocality: "Brisbane", addressRegion: "QLD", postalCode: "4000" }, numberOfBedrooms: 2, numberOfBathroomsTotal: 1, numberOfParkingSpaces: 0, offers: { price: 800000, priceCurrency: "AUD" } };
+  const data = { "@type": "Apartment", url: SAMPLE_URL, address: { streetAddress: "1 Test Street", addressLocality: "Brisbane", addressRegion: "QLD", postalCode: "4000" }, numberOfBedrooms: 2, numberOfBathroomsTotal: 1, numberOfParkingSpaces: 0, offers: { price: 800000, priceCurrency: "AUD" } };
   const property = extractListingHtml(`<script type="application/ld+json">${JSON.stringify(data)}</script>`);
   assert.equal(property.address, "1 Test Street, Brisbane, QLD 4000");
   assert.equal(property.bedrooms, 2);

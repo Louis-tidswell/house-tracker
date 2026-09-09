@@ -1,8 +1,10 @@
-# Listing extraction experiment
+# Listing extraction: prototype and website Auto fill
 
-`test-listing-extraction.mjs` is a standalone Node script. It is not imported by the app, exposed by an API, or connected to Add Property. It makes no database writes and needs no additional dependencies.
+`test-listing-extraction.mjs` is now a command-line harness for [the shared extractor](../lib/listing-extraction.mjs). Add Property's optional **Auto fill** button calls `POST /api/listing-extraction`, which uses the same implementation. HTML parsing uses Cheerio. Extraction makes no database writes; a property is only saved through the existing Save Property action.
 
-## Test result
+The website fills empty address/title, suburb, bed/bath/car and price fields from explicit listing content. Existing entries are preserved, ambiguous fields remain unknown, and failed extraction displays a message while leaving the form usable.
+
+## Original prototype test result
 
 Tested URL: [realestate.com.au listing 151406888](https://www.realestate.com.au/property-unit-qld-red+hill-151406888).
 
@@ -23,6 +25,14 @@ The extracted header fields were:
 | Bedrooms / bathrooms / car spaces | 1 / 1 / 1 |
 
 Live URL-only import is **not reliable from the tested environment**. The parser can process readable HTML or text, but it cannot make the site supply that content. A web lookup may use cached content, so the captured price is not a guarantee of the live listing's current price. No access-control bypass or automatic retry mechanism is included.
+
+## Changes for website integration
+
+The old prototype assumed that three unlabelled numbers in the readable excerpt represented beds, baths, and cars. The shared extractor removes that assumption: running the saved text fixture now returns `null` for those counts. The historical table above describes the original experiment, not a live extraction guarantee.
+
+The shared parser accepts counts only from explicit labels (including accessible icon labels) or corresponding JSON-LD fields belonging to the requested listing. It does not derive bedrooms from total rooms, use unrelated agency addresses or recommendations, or infer fields from the URL slug. Price wording is preserved when it is explicitly advertised.
+
+Network requests validate the listing host and path, reject redirects, disable caching, use a 15-second timeout, and stop at 5 MB. HTTP 429, network errors, unrecognised content, and challenge pages return no property. The form fills only empty fields and ignores responses for URLs that the user has changed.
 
 ## Run
 
@@ -45,7 +55,7 @@ Parse a locally saved readable HTML page:
 node scripts/test-listing-extraction.mjs --html listing.html "https://www.realestate.com.au/property-unit-qld-red+hill-151406888"
 ```
 
-The script supports listing-header text and common JSON-LD address and feature fields. JSON-LD handling is tested with a synthetic fixture because the live response did not provide metadata. It leaves unavailable fields `null`; it does not infer bedrooms from total room counts. These parsers would need validation against more real listing HTML before site integration.
+The script supports listing-header text and common JSON-LD address and feature fields. JSON-LD success cases are tested using explicitly labelled synthetic fixtures; those tests do not prove that a realestate.com.au server will return readable HTML. Missing fields remain `null`. Additional listing layouts may require parser support even when fetching succeeds.
 
 Run regression tests:
 
