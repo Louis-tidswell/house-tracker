@@ -1,4 +1,4 @@
-// Command-line harness for the same extractor used by the website's Auto fill button.
+// Original direct-fetch prototype. Website Auto fill now uses test-tavily-listing.mjs.
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";

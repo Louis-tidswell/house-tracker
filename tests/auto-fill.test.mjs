@@ -78,7 +78,7 @@ function loadRoute(fakeFetchListing) {
   const source = readFileSync(new URL("../app/api/listing-extraction/route.ts", import.meta.url), "utf8");
   const exports = {};
   runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
-    exports, Response, require() { return { validateListingUrl, fetchListing: fakeFetchListing }; },
+    exports, Response, URL, require() { return { validateListingUrl, fetchTavilyListing: fakeFetchListing }; },
   });
   return exports.POST;
 }
@@ -90,4 +90,16 @@ test("website route rejects invalid requests and returns a usable failure messag
   const body = await response.json();
   assert.equal(body.ok, false); assert.equal(body.property, null); assert.match(body.message, /Failed to fill/);
   assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
+test("website route exposes actionable Tavily setup and credit-limit messages", async () => {
+  for (const [code, message] of [["not_configured", /not configured/], ["invalid_key", /could not sign in/], ["usage_limit", /usage limit/], ["no_details", /No matching listing/]]) {
+    const response = await loadRoute(async () => ({ ok: false, property: null, code }))(new Request("http://localhost", { method: "POST", body: JSON.stringify({ url }) }));
+    const body = await response.json(); assert.equal(body.property, null); assert.match(body.message, message);
+  }
+});
+
+test("cross-origin browser requests cannot spend Tavily credits", async () => {
+  const response = await loadRoute(() => assert.fail("must not fetch"))(new Request("http://localhost", { method: "POST", headers: { origin: "https://unrelated.example" }, body: JSON.stringify({ url }) }));
+  assert.equal(response.status, 403);
 });

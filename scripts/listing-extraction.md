@@ -1,8 +1,20 @@
 # Listing extraction: prototype and website Auto fill
 
-`test-listing-extraction.mjs` is now a command-line harness for [the shared extractor](../lib/listing-extraction.mjs). Add Property's optional **Auto fill** button calls `POST /api/listing-extraction`, which uses the same implementation. HTML parsing uses Cheerio. Extraction makes no database writes; a property is only saved through the existing Save Property action.
+Add Property's optional **Auto fill** button calls `POST /api/listing-extraction`, which now uses [Tavily basic search](../lib/tavily-listing.mjs). `test-tavily-listing.mjs` exercises that same path. `test-listing-extraction.mjs` retains the original direct-fetch experiment and HTML/JSON-LD parser. Extraction makes no database writes; a property is only saved through the existing Save Property action.
 
 The website fills empty address/title, suburb, bed/bath/car and price fields from explicit listing content. Existing entries are preserved, ambiguous fields remain unknown, and failed extraction displays a message while leaving the form usable.
+
+## Tavily integration
+
+Set server-only `TAVILY_API_KEY` locally and in Vercel Production, then deploy. Auto fill performs one basic search (one credit), accepts only a single exact-URL result, and parses explicit fields from its title and source snippet/header. It never uses a generated answer, unrelated results, or an automatic second request. Missing and ambiguous information stays blank. See the [README](../README.md#tavily-setup-and-credit-use) for setup and usage details.
+
+Live provider trials: basic and advanced Extract both failed to retrieve the two supplied URLs. Basic Search returned address/suburb and bedrooms for both, and `Offers from $699000` for Red Hill. Neither result supplied bathroom or parking counts; East Brisbane supplied no price. Search queries with extra feature keywords returned unrelated properties, which the integration rejects; the shipped query uses only the exact canonical URL.
+
+```sh
+node --env-file=.env.local scripts/test-tavily-listing.mjs
+```
+
+The sections below record earlier tests before Tavily integration.
 
 ## Original prototype test result
 
