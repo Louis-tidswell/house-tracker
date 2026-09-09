@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { extractFirecrawlData, fetchFirecrawlListing } from "../lib/firecrawl-listing.mjs";
 const url = "https://www.realestate.com.au/property-townhouse-qld-red+hill-152100908";
 const data = { metadata: { sourceURL: url, statusCode: 200 }, rawHtml: '<h1>2/16 Glassey Street, Red Hill, Qld 4059</h1><p>2 bedrooms</p><p aria-label="Bathrooms">1</p><p aria-label="Car spaces">1</p>', markdown: "" };
+
+test("recorded Firecrawl header keeps adjacent bedroom, bathroom and car counts separate", () => {
+  const rawHtml = readFileSync(new URL("./fixtures/rea-152100908-features.html", import.meta.url), "utf8");
+  const property = extractFirecrawlData({ ...data, rawHtml }, url);
+  assert.equal(property.bedrooms, 2); assert.equal(property.bathrooms, 2); assert.equal(property.carSpaces, 1);
+});
 
 test("reads explicit feature labels from scraped HTML", () => {
   const property = extractFirecrawlData(data, url);
