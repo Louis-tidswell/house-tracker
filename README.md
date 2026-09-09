@@ -63,6 +63,12 @@ node scripts/test-listing-extraction.mjs --text tests/fixtures/rea-151406888-hea
 
 The CLI returns JSON and exits with a nonzero status on failed extraction. See [scripts/listing-extraction.md](scripts/listing-extraction.md) for the test history and limitations.
 
+### Published website test
+
+The Auto fill button was exercised on [the published website](https://house-tracker-seven.vercel.app) in both Default and Retro using listing 151406888. Both real server requests received **HTTP 429 from realestate.com.au**. The website returned `ok: false`, `upstreamStatus: 429`, and `property: null`, displayed **Failed to fill**, and left all six fields empty. Manual fields remained editable and Save Property remained enabled. No properties were saved during this test; both mobile layouts had no horizontal overflow or browser JavaScript errors.
+
+Successful and partial filling, preserving manual entries, ignoring stale responses, and saving after failure were verified separately in local browser tests with controlled responses. The production test verifies the failure path; it does **not** establish successful live extraction of the sample address, counts, or price.
+
 ## Verification
 
 ```bash

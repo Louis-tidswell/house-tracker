@@ -34,6 +34,12 @@ The shared parser accepts counts only from explicit labels (including accessible
 
 Network requests validate the listing host and path, reject redirects, disable caching, use a 15-second timeout, and stop at 5 MB. HTTP 429, network errors, unrecognised content, and challenge pages return no property. The form fills only empty fields and ignores responses for URLs that the user has changed.
 
+## Published website verification
+
+After deployment, the real Auto fill button at [house-tracker-seven.vercel.app](https://house-tracker-seven.vercel.app) was tested with listing 151406888 in both Default and Retro. The extraction requests were not mocked. Both returned `{ ok: false, upstreamStatus: 429, property: null }` with the friendly failure message. All address/title, suburb, price, bed, bath, and car fields stayed empty; manual input and the Save Property button remained available. No database writes occurred. Both mobile layouts were checked for overflow and JavaScript errors.
+
+The realestate.com.au server therefore still prevents extraction of this sample from the published website. Successful and partial filling were verified with controlled local browser responses and parser fixtures, separately from this live failure-path test. There is no hardcoded fallback for the sample listing.
+
 ## Run
 
 Run a live request (defaults to the tested listing):
