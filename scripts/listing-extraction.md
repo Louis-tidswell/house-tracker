@@ -10,6 +10,8 @@ Set server-only `TAVILY_API_KEY` locally and in Vercel Production, then deploy. 
 
 Live provider trials: basic and advanced Extract both failed to retrieve the two supplied URLs. Basic Search returned address/suburb and bedrooms for both, and `Offers from $699000` for Red Hill. Neither result supplied bathroom or parking counts; East Brisbane supplied no price. Search queries with extra feature keywords returned unrelated properties, which the integration rejects; the shipped query uses only the exact canonical URL.
 
+After deployment with the Vercel key, the real Auto fill button successfully populated those fields for both URLs in both themes. Manual editing and saving remained available; the browser tests made no database writes. One intermediate search returned no usable match, exercising the failure path, before a subsequent manual test succeeded. This is partial, best-effort importing rather than guaranteed complete retrieval. Investigation and published verification used ten basic searches in total; the failed Extract trials reported zero credits.
+
 ```sh
 node --env-file=.env.local scripts/test-tavily-listing.mjs
 ```

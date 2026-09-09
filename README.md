@@ -48,6 +48,8 @@ According to [Tavily's pricing](https://docs.tavily.com/documentation/api-credit
 
 Initial live Tavily trials returned matching address/suburb and bedroom counts for both sample listings, plus the Red Hill price. Bathroom and parking counts were absent and stayed blank; East Brisbane's price was also absent. Both basic and advanced **Extract** failed on these URLs, so the website uses **Search**, which returned useful source snippets. Full field coverage is not guaranteed.
 
+**Published-site verification:** after configuring Vercel, both supplied URLs successfully filled the above fields through the real Auto fill button in **Default and Retro**. Missing fields remained empty, manual editing and Save Property stayed available, and no properties were saved during the test. One intermediate search returned no usable matching details and displayed the failure message; a subsequent manual test succeeded. Provider results can vary between requests. Local browser tests also cover preserving existing entries, partial/failure responses, stale responses and manual saving. The production build and all 64 automated tests passed.
+
 Test the website's retrieval path locally (each run uses one basic search):
 
 ```bash
