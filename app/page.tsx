@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { matchesPriceRange, parsePriceRange } from "@/lib/price";
 
 type SavedProperty = {
   id: string;
@@ -29,6 +30,7 @@ type Coordinates = Record<string, { lat: number; lon: number }>;
 
 type Theme = "default" | "retro";
 type Tab = "active" | "archived";
+type ViewMode = "list" | "grid";
 
 type PropertyList = {
   id: string;
@@ -53,6 +55,7 @@ const COORDS_STORAGE_KEY = "house-tracker-coordinates-v1";
 const ACTIVE_PROFILE_KEY = "house-tracker-active-profile";
 const THEME_KEY = "house-tracker-theme";
 const CURRENT_LIST_KEY = "house-tracker-current-list-id";
+const MISSION_VIEWS_KEY = "house-tracker-mission-views-v1";
 const PropertyMap = dynamic(() => import("./components/PropertyMap"), { ssr: false });
 
 export default function Home() {
@@ -75,7 +78,8 @@ export default function Home() {
   const [filterMinBeds, setFilterMinBeds] = useState("");
   const [filterMinBaths, setFilterMinBaths] = useState("");
   const [filterMinCars, setFilterMinCars] = useState("");
-  const [filterPrice, setFilterPrice] = useState("");
+  const [filterMinPrice, setFilterMinPrice] = useState("");
+  const [filterMaxPrice, setFilterMaxPrice] = useState("");
   const [sortBy, setSortBy] = useState<"priority" | "beds" | "baths" | "cars" | "price">("priority");
 
   const [activeTab, setActiveTab] = useState<Tab>("active");
@@ -89,6 +93,8 @@ export default function Home() {
   const [propertyLists, setPropertyLists] = useState<PropertyList[]>([]);
   const [activeListId, setActiveListId] = useState<string>("");
   const [newListName, setNewListName] = useState("");
+  const [missionViews, setMissionViews] = useState<Record<string, ViewMode>>({});
+  const [expandedProperties, setExpandedProperties] = useState<Record<string, boolean>>({});
   const listRequestId = useRef(0);
 
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
@@ -105,6 +111,8 @@ export default function Home() {
   const notes_timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const is_retro = theme === "retro";
+  const viewMode = missionViews[activeListId] ?? "grid";
+  const invalidPriceRange = filterMinPrice !== "" && filterMaxPrice !== "" && Number(filterMinPrice) > Number(filterMaxPrice);
 
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null;
   const priorityProfiles = useMemo(() => {
@@ -178,6 +186,18 @@ export default function Home() {
             if (props_json.ok) {
               setSaved(props_json.properties);
             }
+          }
+        }
+
+        const viewsRaw = localStorage.getItem(MISSION_VIEWS_KEY);
+        if (viewsRaw) {
+          try {
+            const views = JSON.parse(viewsRaw);
+            if (views && typeof views === "object" && !Array.isArray(views)) {
+              setMissionViews(Object.fromEntries(Object.entries(views).filter((entry) => entry[1] === "list" || entry[1] === "grid")) as Record<string, ViewMode>);
+            }
+          } catch {
+            localStorage.removeItem(MISSION_VIEWS_KEY);
           }
         }
 
@@ -294,27 +314,18 @@ export default function Home() {
     return draftPriority[priorityKey(property.id)] ?? getPriority(property);
   }
 
-  function parsePriceValue(priceText: string | null): number {
-    if (!priceText) return Number.MAX_SAFE_INTEGER;
-    const normalized = priceText.replace(/,/g, "");
-    const millionMatch = normalized.match(/(\d+(?:\.\d+)?)\s*m/i);
-    if (millionMatch) return Math.round(Number(millionMatch[1]) * 1_000_000);
-    const numberMatch = normalized.match(/\d{5,8}/);
-    return numberMatch ? Number(numberMatch[0]) : Number.MAX_SAFE_INTEGER;
-  }
-
   // Separate active vs archived
   const activeProperties = saved.filter((p) => p.status !== "archived");
   const archivedProperties = saved.filter((p) => p.status === "archived");
 
   const sorted = useMemo(() => {
-    const source = activeTab === "active" ? activeProperties : archivedProperties;
+    const source = saved.filter((property) => activeTab === "archived" ? property.status === "archived" : property.status !== "archived");
     const clone = [...source];
     clone.sort((a, b) => {
       if (sortBy === "beds") return (b.bedrooms ?? -1) - (a.bedrooms ?? -1);
       if (sortBy === "baths") return (b.bathrooms ?? -1) - (a.bathrooms ?? -1);
       if (sortBy === "cars") return (b.carSpaces ?? -1) - (a.carSpaces ?? -1);
-      if (sortBy === "price") return parsePriceValue(a.priceText) - parsePriceValue(b.priceText);
+      if (sortBy === "price") return (parsePriceRange(a.priceText)?.min ?? Number.MAX_SAFE_INTEGER) - (parsePriceRange(b.priceText)?.min ?? Number.MAX_SAFE_INTEGER);
       return getPriority(b) - getPriority(a);
     });
     return clone;
@@ -324,12 +335,11 @@ export default function Home() {
     const minBeds = filterMinBeds ? Number(filterMinBeds) : 0;
     const minBaths = filterMinBaths ? Number(filterMinBaths) : 0;
     const minCars = filterMinCars ? Number(filterMinCars) : 0;
-    const priceFilter = filterPrice.trim().toLowerCase();
 
     if ((property.bedrooms ?? 0) < minBeds) return false;
     if ((property.bathrooms ?? 0) < minBaths) return false;
     if ((property.carSpaces ?? 0) < minCars) return false;
-    if (priceFilter && !(property.priceText ?? "").toLowerCase().includes(priceFilter)) return false;
+    if (!matchesPriceRange(property.priceText, filterMinPrice, filterMaxPrice)) return false;
     return true;
   }
 
@@ -570,7 +580,8 @@ export default function Home() {
     setFilterMinBeds("");
     setFilterMinBaths("");
     setFilterMinCars("");
-    setFilterPrice("");
+    setFilterMinPrice("");
+    setFilterMaxPrice("");
   }
 
   function ensureAuthorPrefix(propertyId: string) {
@@ -692,6 +703,83 @@ export default function Home() {
     );
   }
 
+  function renderViewControls() {
+    return (
+      <div role="group" aria-label="Property view" className={`mt-3 flex gap-1 ${is_retro ? "" : "border-b pb-1"}`}>
+        {(["list", "grid"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            aria-pressed={viewMode === mode}
+            onClick={() => {
+              const next = { ...missionViews, [activeListId]: mode };
+              setMissionViews(next);
+              localStorage.setItem(MISSION_VIEWS_KEY, JSON.stringify(next));
+            }}
+            className={is_retro
+              ? `rounded-t border px-4 py-2 text-xs font-bold tracking-wider ${viewMode === mode ? "border-b-0" : "opacity-50"}`
+              : `rounded-t px-4 py-2 text-sm font-medium ${viewMode === mode ? "border-b-2 border-black" : "text-zinc-500"}`}
+            style={is_retro ? {
+              borderColor: "var(--retro-border)",
+              color: viewMode === mode ? "var(--retro-accent)" : "var(--retro-text-dim)",
+              background: viewMode === mode ? "var(--retro-panel)" : "transparent",
+            } : undefined}
+          >
+            {is_retro ? mode.toUpperCase() : mode === "list" ? "List" : "Grid"}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderCompactProperty(property: SavedProperty) {
+    return (
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h3 className="break-words text-sm font-semibold" style={is_retro ? { color: "var(--retro-accent)" } : undefined}>{property.title ?? "Untitled property"}</h3>
+          <p className="break-words text-xs" style={{ color: is_retro ? "var(--retro-text-dim)" : "#52525b" }}>{property.address ?? property.sourceUrl}</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="font-semibold" style={is_retro ? { color: "var(--retro-amber)" } : undefined}>{property.priceText ?? "No price"}</span>
+            <span>{property.bedrooms ?? "?"} bed · {property.bathrooms ?? "?"} bath · {property.carSpaces ?? "?"} car</span>
+          </div>
+        </div>
+        <div className="shrink-0 space-y-2 text-right">
+          <p className="text-xs" style={is_retro ? { color: "var(--retro-amber)" } : undefined}>Priority {getPriority(property)}/10</p>
+          <button
+            type="button"
+            aria-expanded={false}
+            aria-label={`Show details for ${property.title ?? "Untitled property"}`}
+            onClick={() => setExpandedProperties((prev) => ({ ...prev, [property.id]: true }))}
+            className={is_retro ? "retro-btn rounded px-2 py-1 text-xs" : "rounded border px-2 py-1 text-xs"}
+          >
+            {is_retro ? "DETAILS" : "Details"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderCollapseControl(property: SavedProperty) {
+    if (viewMode !== "list" || !expandedProperties[property.id] || editingId === property.id) return null;
+    return (
+      <button
+        type="button"
+        aria-expanded={true}
+        aria-label={`Hide details for ${property.title ?? "Untitled property"}`}
+        onClick={(event) => { event.stopPropagation(); setExpandedProperties((prev) => ({ ...prev, [property.id]: false })); }}
+        className={`mb-2 ${is_retro ? "retro-btn rounded px-2 py-1 text-xs" : "rounded border px-2 py-1 text-xs"}`}
+      >
+        {is_retro ? "HIDE DETAILS" : "Hide details"}
+      </button>
+    );
+  }
+
+  function renderPriceFilterHint() {
+    if (invalidPriceRange) return <p role="alert" className="mt-2 text-xs" style={{ color: is_retro ? "var(--retro-danger)" : "#dc2626" }}>Minimum price must be less than or equal to maximum price.</p>;
+    if (!filterMinPrice && !filterMaxPrice) return null;
+    return <p className="mt-2 text-xs" style={{ color: is_retro ? "var(--retro-text-dim)" : "#52525b" }}>Prices in AUD. Overlapping price guides match. Listings outside your range or without a price are dimmed.</p>;
+  }
+
   function renderPriorityConfirm(property: SavedProperty) {
     if (!priorityProfiles.some((profile) => profile.id === activeProfileId)) return null;
     const key = priorityKey(property.id);
@@ -811,6 +899,7 @@ export default function Home() {
               )
             )}
           </div>
+          {renderViewControls()}
         </section>
 
         <a href={`/properties/new?listId=${activeListId}`} className="inline-flex items-center justify-center rounded bg-black px-4 py-3 text-lg font-medium text-white active:bg-zinc-700">
@@ -819,11 +908,12 @@ export default function Home() {
 
         <section className="rounded border p-3">
           <h2 className="mb-2 text-lg font-semibold">Filters & Sort</h2>
-          <div className="grid gap-2 md:grid-cols-5">
+          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
             <input value={filterMinBeds} onChange={(event) => setFilterMinBeds(event.target.value)} placeholder="Min beds" className="rounded border p-2" />
             <input value={filterMinBaths} onChange={(event) => setFilterMinBaths(event.target.value)} placeholder="Min baths" className="rounded border p-2" />
             <input value={filterMinCars} onChange={(event) => setFilterMinCars(event.target.value)} placeholder="Min cars" className="rounded border p-2" />
-            <input value={filterPrice} onChange={(event) => setFilterPrice(event.target.value)} placeholder="Price contains" className="rounded border p-2" />
+            <input type="number" min="0" step="1000" inputMode="numeric" aria-label="Minimum price" value={filterMinPrice} onChange={(event) => setFilterMinPrice(event.target.value)} placeholder="Min price ($)" className="min-w-0 rounded border p-2" />
+            <input type="number" min="0" step="1000" inputMode="numeric" aria-label="Maximum price" value={filterMaxPrice} onChange={(event) => setFilterMaxPrice(event.target.value)} placeholder="Max price ($)" className="min-w-0 rounded border p-2" />
             <select value={sortBy} onChange={(event) => setSortBy(event.target.value as "priority" | "beds" | "baths" | "cars" | "price")} className="rounded border p-2">
               <option value="priority">Sort: Your priority</option>
               <option value="beds">Sort: Bedrooms</option>
@@ -832,6 +922,7 @@ export default function Home() {
               <option value="price">Sort: Price</option>
             </select>
           </div>
+          {renderPriceFilterHint()}
           <button onClick={clearFilters} className="mt-2 rounded border px-3 py-2">Clear Filters</button>
         </section>
 
@@ -845,18 +936,20 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-3">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <section className="min-w-0 space-y-3">
             <h2 className="text-xl font-semibold">
               {activeTab === "active" ? `Saved Properties (${sorted.length})` : `Archived (${sorted.length})`}
             </h2>
             {renderArchiveControls()}
+            <div className={viewMode === "grid" ? "grid items-start gap-3 md:grid-cols-2" : "space-y-2"}>
             {[...matched, ...unmatched].map((property, index) => {
               const isMatched = index < matched.length;
               const isEditing = editingId === property.id;
               return (
-                <article key={property.id} ref={(node) => { cardRefs.current[property.id] = node; }} className={`rounded border p-3 ${!isMatched ? "opacity-45" : ""} ${selected?.id === property.id ? "ring-2 ring-black" : ""}`} onClick={() => setSelectedId(property.id)}>
-                  {isEditing ? (
+                <article key={property.id} ref={(node) => { cardRefs.current[property.id] = node; }} className={`min-w-0 break-words rounded border p-3 ${!isMatched ? "opacity-45" : ""} ${selected?.id === property.id ? "ring-2 ring-black" : ""}`} onClick={() => setSelectedId(property.id)}>
+                  {renderCollapseControl(property)}
+                  {viewMode === "list" && !expandedProperties[property.id] && !isEditing ? renderCompactProperty(property) : isEditing ? (
                     <>
                       <h3 className="font-medium text-blue-700">Editing Property</h3>
                       {renderEditForm(property)}
@@ -938,6 +1031,7 @@ export default function Home() {
                 </article>
               );
             })}
+            </div>
           </section>
 
           <section className="space-y-3">
@@ -1082,6 +1176,7 @@ export default function Home() {
             )
           )}
         </div>
+        {renderViewControls()}
       </section>
 
       {/* Add Property Command Button */}
@@ -1092,7 +1187,7 @@ export default function Home() {
       {/* Filters */}
       <section className="retro-panel rounded p-4">
         <p className="retro-heading mb-3">SYSTEM CONTROLS</p>
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <div>
             <p className="retro-label">MIN BEDS</p>
             <input value={filterMinBeds} onChange={(event) => setFilterMinBeds(event.target.value)} placeholder="—" className="retro-input w-full rounded px-2 py-2 text-sm" />
@@ -1106,8 +1201,12 @@ export default function Home() {
             <input value={filterMinCars} onChange={(event) => setFilterMinCars(event.target.value)} placeholder="—" className="retro-input w-full rounded px-2 py-2 text-sm" />
           </div>
           <div>
-            <p className="retro-label">PRICE FILTER</p>
-            <input value={filterPrice} onChange={(event) => setFilterPrice(event.target.value)} placeholder="—" className="retro-input w-full rounded px-2 py-2 text-sm" />
+            <label htmlFor="min-price" className="retro-label block">MIN PRICE ($)</label>
+            <input id="min-price" type="number" min="0" step="1000" inputMode="numeric" aria-label="Minimum price" value={filterMinPrice} onChange={(event) => setFilterMinPrice(event.target.value)} placeholder="—" className="retro-input w-full rounded px-2 py-2 text-sm" />
+          </div>
+          <div>
+            <label htmlFor="max-price" className="retro-label block">MAX PRICE ($)</label>
+            <input id="max-price" type="number" min="0" step="1000" inputMode="numeric" aria-label="Maximum price" value={filterMaxPrice} onChange={(event) => setFilterMaxPrice(event.target.value)} placeholder="—" className="retro-input w-full rounded px-2 py-2 text-sm" />
           </div>
           <div>
             <p className="retro-label">SORT BY</p>
@@ -1120,6 +1219,7 @@ export default function Home() {
             </select>
           </div>
         </div>
+        {renderPriceFilterHint()}
         <button onClick={clearFilters} className="retro-btn mt-3 rounded px-3 py-1.5 text-xs">CLEAR FILTERS</button>
       </section>
 
@@ -1150,14 +1250,15 @@ export default function Home() {
       </div>
 
       {/* Main grid */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
 
         {/* Property cards */}
-        <section className="space-y-4">
+        <section className="min-w-0 space-y-4">
           <p className="retro-heading">
             {activeTab === "active" ? `DATA READOUT — ${sorted.length} PROPERTIES` : `ARCHIVE — ${sorted.length} STORED`}
           </p>
           {renderArchiveControls()}
+          <div className={viewMode === "grid" ? "grid items-start gap-4 md:grid-cols-2" : "space-y-2"}>
           {[...matched, ...unmatched].map((property, index) => {
             const isMatched = index < matched.length;
             const isSelected = selected?.id === property.id;
@@ -1166,10 +1267,11 @@ export default function Home() {
               <article
                 key={property.id}
                 ref={(node) => { cardRefs.current[property.id] = node; }}
-                className={`retro-card rounded p-4 cursor-pointer ${!isMatched ? "opacity-40" : ""} ${isSelected ? "retro-card-selected" : ""}`}
+                className={`retro-card min-w-0 break-words rounded p-4 cursor-pointer ${!isMatched ? "opacity-40" : ""} ${isSelected ? "retro-card-selected" : ""}`}
                 onClick={() => setSelectedId(property.id)}
               >
-                {isEditing ? (
+                {renderCollapseControl(property)}
+                {viewMode === "list" && !expandedProperties[property.id] && !isEditing ? renderCompactProperty(property) : isEditing ? (
                   <>
                     <h3 className="text-sm font-bold" style={{ color: "var(--retro-amber)" }}>EDITING PROPERTY</h3>
                     {renderEditForm(property)}
@@ -1290,6 +1392,7 @@ export default function Home() {
               </article>
             );
           })}
+          </div>
         </section>
 
         {/* Map */}

@@ -7,7 +7,13 @@ Collaborative Next.js app for tracking house listings with a friend.
 - Rank each property 1–10 per profile
 - Filter/sort by beds, baths, cars, price, priority
 - View saved properties on a map
+- Choose compact List rows or full Grid cards in each mission; the choice is remembered on your device
+- Filter by minimum and maximum price in AUD, including advertised ranges and shorthand such as $850k or $1.2m
 - PWA support — Android share target, iPhone Shortcut workflow
+
+List rows expand with **Details** to access priorities, notes, and property actions. Price ranges match when they overlap your budget. As with the other filters, non-matching properties remain visible but dimmed; listings without a numeric price are dimmed when a price limit is set.
+
+A standalone listing-extraction experiment and its results are documented in [scripts/listing-extraction.md](scripts/listing-extraction.md). It is not connected to the site.
 
 ## Run locally
 
