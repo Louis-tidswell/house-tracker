@@ -31,7 +31,7 @@ In **Add Property**, enter a listing URL to reveal **Auto fill**. Clicking it as
 | --- | --- |
 | Address / Title | The address in the matching search result's title |
 | Suburb | The explicit suburb in that address |
-| Beds, Baths, Cars | Explicitly labelled counts in the matching result's snippet or listing header |
+| Beds, Baths, Cars | Explicitly labelled counts in the matching result's snippet, header, description, or property feature sections |
 | Price Guide | Advertised price text, such as `Offers from $699000`, when present in the source |
 
 Existing entries are kept. Unknown or ambiguous fields remain empty. Auto fill does not save a property, change the selected mission, status, or ranking, or infer facts from the URL slug. Review the result and use **Save Property** as usual.
@@ -47,6 +47,8 @@ Add `TAVILY_API_KEY` to `.env.local` for local development and to **Vercel → h
 According to [Tavily's pricing](https://docs.tavily.com/documentation/api-credits), basic search costs **1 credit**. The 1,000-credit free allowance supports approximately **1,000 clicks per month**, less testing or other use of that account. Missing keys, authentication failures, usage limits, and missing results show friendly messages while preserving manual entry. Requests time out after 20 seconds and response bodies are limited to 2 MB. The browser never receives the key or raw provider errors. Cross-origin browser requests are rejected; this is not a per-user quota or authentication system for the endpoint.
 
 Initial live Tavily trials returned matching address/suburb and bedroom counts for both sample listings, plus the Red Hill price. Bathroom and parking counts were absent and stayed blank; East Brisbane's price was also absent. Both basic and advanced **Extract** failed on these URLs, so the website uses **Search**, which returned useful source snippets. Full field coverage is not guaranteed.
+
+**Parser correction:** full Markdown is now read through the listing's description and property feature sections. The parser accepts explicit number words, feature tables, and counts on the line after a label. AI highlights, other listings, recommendations, agent details, and suburb statistics remain excluded; conflicting counts stay unknown. Prices still come from the listing header. This fixes discarded information when fuller source content is available, but cannot recover fields missing from the provider response. Regression tests run offline; the current build and all 72 tests pass. See [the retrieval investigation](scripts/retrieval-investigation.md) for the remaining provider limitation.
 
 **Published-site verification:** after configuring Vercel, both supplied URLs successfully filled the above fields through the real Auto fill button in **Default and Retro**. Missing fields remained empty, manual editing and Save Property stayed available, and no properties were saved during the test. One intermediate search returned no usable matching details and displayed the failure message; a subsequent manual test succeeded. Provider results can vary between requests. Local browser tests also cover preserving existing entries, partial/failure responses, stale responses and manual saving. The production build and all 64 automated tests passed.
 

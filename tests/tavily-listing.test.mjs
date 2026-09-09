@@ -45,6 +45,96 @@ test("full markdown does not import AI highlights or recommendations below the l
   assert.equal(property.bedrooms, null); assert.equal(property.bathrooms, null); assert.equal(property.carSpaces, null);
 });
 
+test("reads bathrooms and parking from feature sections after the first heading", () => {
+  const property = extractTavilyResult({ ...result, raw_content: `# 2204/21 Upper Clifton Terrace, Red Hill, Qld 4059
+1 bedroom
+Offers from $699,000
+## Property features
+### Bedrooms & bathrooms
+1 bathroom
+### Parking
+Garage spaces: 1` }, url);
+  assert.equal(property.bedrooms, 1); assert.equal(property.bathrooms, 1);
+  assert.equal(property.carSpaces, 1); assert.equal(property.priceText, "Offers from $699,000");
+});
+
+test("reads explicit number words from the address-identified description, skipping AI highlights", () => {
+  const property = extractTavilyResult({ url: eastUrl, title: "12/190 Wellington Road, East Brisbane, Qld 4169 - Apartment for Sale", raw_content: `# 12/190 Wellington Road, East Brisbane, Qld 4169
+2
+2
+2
+## Property highlights
+### Parking
+9 car spaces
+## Elevated, refreshed and effortlessly connected
+12/190 WELLINGTON ROAD, EAST BRISBANE
+Two generous bedrooms with built-in wardrobes. Two bathrooms, recently renovated.
+Two secure, side-by-side car spaces with storage cage.
+## Property features
+### Parking
+Garage spaces: 2
+## Discover insights for 3 bed units
+3 bedrooms, 6 bathrooms, 7 car spaces` }, eastUrl);
+  assert.equal(property.bedrooms, 2); assert.equal(property.bathrooms, 2); assert.equal(property.carSpaces, 2);
+});
+
+test("keeps recommendation descendants excluded even when headed Property features", () => {
+  const property = extractTavilyResult({ ...result, raw_content: `# 2204/21 Upper Clifton Terrace, Red Hill, Qld 4059
+1 bedroom
+## Property features
+Bathrooms: 1
+## Similar properties
+### Property features
+Garage spaces: 8
+## Property features
+9 bathrooms` }, url);
+  assert.equal(property.bathrooms, 1); assert.equal(property.carSpaces, null);
+});
+
+test("supports setext headings and counts explicitly labelled on the next line", () => {
+  const property = extractTavilyResult({ ...result, raw_content: `2204/21 Upper Clifton Terrace, Red Hill, Qld 4059
+===
+Property features
+---
+Bathrooms:
+2
+Garage spaces:
+0` }, url);
+  assert.equal(property.bathrooms, 2); assert.equal(property.carSpaces, 0);
+});
+
+test("reads counts in feature tables and number words following explicit labels", () => {
+  const property = extractTavilyResult({ ...result, raw_content: `# 2204/21 Upper Clifton Terrace, Red Hill, Qld 4059
+## Property features
+| Bedrooms | 2 |
+| Bathrooms | 1 |
+Garage spaces: zero` }, url);
+  assert.equal(property.bedrooms, 2); assert.equal(property.bathrooms, 1); assert.equal(property.carSpaces, 0);
+});
+
+test("the saved targeted search supplies parking without treating ensuites as total bathrooms", () => {
+  const property = extractTavilyResult({ ...result, content: "Bedrooms & bathrooms. Built-in wardrobes. Ensuites: 1. Parking. Garage spaces: 2. Secure parking." }, url);
+  assert.equal(property.carSpaces, 2); assert.equal(property.bathrooms, null); assert.equal(property.bedrooms, null);
+});
+
+test("conflicting counts across eligible sections remain unknown and fees do not supply a price", () => {
+  const property = extractTavilyResult({ ...result, raw_content: `# 2204/21 Upper Clifton Terrace, Red Hill, Qld 4059
+1 bedroom
+## Description
+2 bedrooms. Body corporate price: $4,000. Rental guide: $600.
+## Property features
+3 bathrooms
+Bathrooms: 2` }, url);
+  assert.equal(property.bedrooms, null); assert.equal(property.bathrooms, null); assert.equal(property.priceText, null);
+});
+
+test("a different property or unidentified marketing section cannot contribute counts", () => {
+  for (const section of ["## Another home\n6 bathrooms", "# 10 Other Street, Brisbane, Qld 4000\n6 bathrooms\n## Property features\nGarage spaces: 8"]) {
+    const property = extractTavilyResult({ ...result, raw_content: `# 2204/21 Upper Clifton Terrace, Red Hill, Qld 4059\n1 bedroom\n${section}` }, url);
+    assert.equal(property.bathrooms, null); assert.equal(property.carSpaces, null);
+  }
+});
+
 test("wrong URLs, invalid titles and URL-only responses cannot supply details", () => {
   for (const value of [{ ...result, url: eastUrl }, { ...result, title: "Listing unavailable" }, { url }]) {
     assert.equal(extractTavilyResult(value, url), null);
