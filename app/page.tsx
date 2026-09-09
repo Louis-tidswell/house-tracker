@@ -68,6 +68,8 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [coordinates, setCoordinates] = useState<Coordinates>({});
   const [draftPriority, setDraftPriority] = useState<Record<string, number>>({});
+  const [savingPriority, setSavingPriority] = useState<Record<string, boolean>>({});
+  const [priorityErrors, setPriorityErrors] = useState<Record<string, string>>({});
   const geocode_failed = useRef<Set<string>>(new Set());
 
   const [filterMinBeds, setFilterMinBeds] = useState("");
@@ -78,12 +80,16 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState<Tab>("active");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmClearListId, setConfirmClearListId] = useState<string | null>(null);
+  const [clearingArchived, setClearingArchived] = useState(false);
+  const [clearArchivedError, setClearArchivedError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
   const [propertyLists, setPropertyLists] = useState<PropertyList[]>([]);
   const [activeListId, setActiveListId] = useState<string>("");
   const [newListName, setNewListName] = useState("");
+  const listRequestId = useRef(0);
 
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editProfileName, setEditProfileName] = useState("");
@@ -208,12 +214,16 @@ export default function Home() {
   }, [activeListId, ready]);
 
   function switchList(listId: string) {
+    const requestId = ++listRequestId.current;
     setActiveListId(listId);
+    setSaved([]);
+    setConfirmClearListId(null);
+    setClearArchivedError(null);
     void (async () => {
       const res = await fetch(`/api/properties?listId=${listId}`);
       if (res.ok) {
         const json = await res.json();
-        if (json.ok) {
+        if (json.ok && requestId === listRequestId.current) {
           setSaved(json.properties);
         }
       }
@@ -273,9 +283,16 @@ export default function Home() {
 
   const getPriority = useCallback((property: SavedProperty): number => {
     if (!activeProfileId) return 5;
-    if (typeof draftPriority[property.id] === "number") return draftPriority[property.id];
     return property.rankings[activeProfileId] ?? 5;
-  }, [activeProfileId, draftPriority]);
+  }, [activeProfileId]);
+
+  function priorityKey(propertyId: string) {
+    return `${propertyId}:${activeProfileId}`;
+  }
+
+  function getDraftPriority(property: SavedProperty) {
+    return draftPriority[priorityKey(property.id)] ?? getPriority(property);
+  }
 
   function parsePriceValue(priceText: string | null): number {
     if (!priceText) return Number.MAX_SAFE_INTEGER;
@@ -325,6 +342,28 @@ export default function Home() {
     if (selectedId === id) setSelectedId(null);
     setConfirmDeleteId(null);
     void fetch(`/api/properties/${id}`, { method: "DELETE" });
+  }
+
+  async function clearArchivedProperties() {
+    if (!activeListId || confirmClearListId !== activeListId || clearingArchived) return;
+    const requestId = listRequestId.current;
+    setClearingArchived(true);
+    setClearArchivedError(null);
+    try {
+      const res = await fetch(`/api/properties?listId=${encodeURIComponent(activeListId)}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error("Could not clear archived properties. Please try again.");
+      const deletedIds = new Set<string>(json.deletedIds);
+      setSaved((prev) => prev.filter((property) => !deletedIds.has(property.id)));
+      setSelectedId((prev) => prev && deletedIds.has(prev) ? null : prev);
+      if (requestId === listRequestId.current) setConfirmClearListId(null);
+    } catch {
+      if (requestId === listRequestId.current) {
+        setClearArchivedError("Could not clear archived properties. Please try again.");
+      }
+    } finally {
+      setClearingArchived(false);
+    }
   }
 
   function archiveProperty(id: string) {
@@ -395,32 +434,39 @@ export default function Home() {
     });
   }
 
-  function commitPriority(propertyId: string) {
-    const value = draftPriority[propertyId];
-    if (typeof value !== "number" || !activeProfileId) return;
+  async function commitPriority(propertyId: string) {
+    const key = priorityKey(propertyId);
+    const profileId = activeProfileId;
+    const value = draftPriority[key];
+    if (typeof value !== "number" || !profileId || savingPriority[key]) return;
 
     const property = saved.find((p) => p.id === propertyId);
     if (!property) return;
 
-    const new_rankings = { ...property.rankings, [activeProfileId]: value };
-
-    setSaved((prev) => prev.map((p) =>
-      p.id === propertyId
-        ? { ...p, rankings: new_rankings }
-        : p,
-    ));
-
-    setDraftPriority((prev) => {
-      const next = { ...prev };
-      delete next[propertyId];
-      return next;
-    });
-
-    void fetch(`/api/properties/${propertyId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ rankings: new_rankings }),
-    });
+    const new_rankings = { ...property.rankings, [profileId]: value };
+    setSavingPriority((prev) => ({ ...prev, [key]: true }));
+    setPriorityErrors((prev) => ({ ...prev, [key]: "" }));
+    try {
+      const res = await fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rankings: new_rankings }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error("Could not save priority. Please try again.");
+      setSaved((prev) => prev.map((p) =>
+        p.id === propertyId ? { ...p, rankings: { ...p.rankings, [profileId]: value } } : p,
+      ));
+      setDraftPriority((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } catch {
+      setPriorityErrors((prev) => ({ ...prev, [key]: "Could not save priority. Please try again." }));
+    } finally {
+      setSavingPriority((prev) => ({ ...prev, [key]: false }));
+    }
   }
 
   function addProfile() {
@@ -646,6 +692,54 @@ export default function Home() {
     );
   }
 
+  function renderPriorityConfirm(property: SavedProperty) {
+    if (!priorityProfiles.some((profile) => profile.id === activeProfileId)) return null;
+    const key = priorityKey(property.id);
+    const hasChanges = getDraftPriority(property) !== getPriority(property);
+    return (
+      <div className="mt-2" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => void commitPriority(property.id)}
+          disabled={!hasChanges || savingPriority[key]}
+          className={`${is_retro ? "retro-btn rounded px-3 py-1.5 text-xs" : "rounded border bg-black px-3 py-1 text-sm text-white"} disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          {savingPriority[key] ? (is_retro ? "SAVING..." : "Saving...") : (is_retro ? "CONFIRM" : "Confirm")}
+        </button>
+        {priorityErrors[key] && (
+          <p role="alert" className="mt-1 text-xs" style={{ color: is_retro ? "var(--retro-danger)" : "#dc2626" }}>{priorityErrors[key]}</p>
+        )}
+      </div>
+    );
+  }
+
+  function renderArchiveControls() {
+    if (activeTab !== "archived") return null;
+    const buttonClass = `${is_retro ? "retro-btn rounded px-3 py-1.5 text-xs" : "rounded border px-3 py-1 text-sm"} disabled:cursor-not-allowed disabled:opacity-40`;
+    return (
+      <div className="space-y-2">
+        {confirmClearListId === activeListId ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <p className="w-full">
+              Permanently delete all {archivedProperties.length} archived properties in &quot;{propertyLists.find((list) => list.id === activeListId)?.name}&quot;?
+            </p>
+            <button type="button" onClick={() => void clearArchivedProperties()} disabled={clearingArchived || !archivedProperties.length} className={buttonClass} style={{ color: is_retro ? "var(--retro-danger)" : "#dc2626" }}>
+              {clearingArchived ? (is_retro ? "CLEARING..." : "Clearing...") : (is_retro ? "DELETE ALL" : "Delete all")}
+            </button>
+            <button type="button" onClick={() => { setConfirmClearListId(null); setClearArchivedError(null); }} disabled={clearingArchived} className={buttonClass}>
+              {is_retro ? "CANCEL" : "Cancel"}
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => { setConfirmClearListId(activeListId); setClearArchivedError(null); }} disabled={!activeListId || !archivedProperties.length || clearingArchived} className={buttonClass} style={{ color: is_retro ? "var(--retro-danger)" : "#dc2626" }}>
+            {is_retro ? "CLEAR ALL" : "Clear all"}
+          </button>
+        )}
+        {clearArchivedError && <p role="alert" className="text-xs" style={{ color: is_retro ? "var(--retro-danger)" : "#dc2626" }}>{clearArchivedError}</p>}
+      </div>
+    );
+  }
+
   // ─── DEFAULT THEME RENDER ───
 
   if (!is_retro) {
@@ -756,6 +850,7 @@ export default function Home() {
             <h2 className="text-xl font-semibold">
               {activeTab === "active" ? `Saved Properties (${sorted.length})` : `Archived (${sorted.length})`}
             </h2>
+            {renderArchiveControls()}
             {[...matched, ...unmatched].map((property, index) => {
               const isMatched = index < matched.length;
               const isEditing = editingId === property.id;
@@ -780,7 +875,7 @@ export default function Home() {
                         <p className="mb-1 font-medium">Priorities</p>
                         {priorityProfiles.map((profile) => {
                           const isActive = profile.id === activeProfileId;
-                          const current = isActive ? getPriority(property) : (property.rankings[profile.id] ?? 5);
+                          const current = isActive ? getDraftPriority(property) : (property.rankings[profile.id] ?? 5);
                           return (
                             <div key={profile.id} className="mb-1">
                               <div className="flex items-center justify-between">
@@ -789,10 +884,9 @@ export default function Home() {
                               </div>
                               {isActive ? (
                                 <input type="range" min={1} max={10} value={current}
-                                  onChange={(event) => setDraftPriority((prev) => ({ ...prev, [property.id]: Number(event.target.value) }))}
-                                  onMouseUp={() => commitPriority(property.id)}
-                                  onTouchEnd={() => commitPriority(property.id)}
-                                  onKeyUp={() => commitPriority(property.id)}
+                                  aria-label={`${profile.name} priority for ${property.title ?? "Untitled property"}`}
+                                  disabled={savingPriority[priorityKey(property.id)]}
+                                  onChange={(event) => setDraftPriority((prev) => ({ ...prev, [priorityKey(property.id)]: Number(event.target.value) }))}
                                   className="w-full" />
                               ) : (
                                 <div className="h-2 w-full rounded bg-zinc-200">
@@ -802,6 +896,7 @@ export default function Home() {
                             </div>
                           );
                         })}
+                        {renderPriorityConfirm(property)}
                       </div>
                       <div className="mt-2 space-y-2">
                         <div className="flex gap-2">
@@ -1062,6 +1157,7 @@ export default function Home() {
           <p className="retro-heading">
             {activeTab === "active" ? `DATA READOUT — ${sorted.length} PROPERTIES` : `ARCHIVE — ${sorted.length} STORED`}
           </p>
+          {renderArchiveControls()}
           {[...matched, ...unmatched].map((property, index) => {
             const isMatched = index < matched.length;
             const isSelected = selected?.id === property.id;
@@ -1117,7 +1213,7 @@ export default function Home() {
                       <p className="retro-heading mb-2">CALIBRATION</p>
                       {priorityProfiles.map((profile) => {
                         const isActive = profile.id === activeProfileId;
-                        const current = isActive ? getPriority(property) : (property.rankings[profile.id] ?? 5);
+                        const current = isActive ? getDraftPriority(property) : (property.rankings[profile.id] ?? 5);
                         return (
                           <div key={profile.id} className="mb-2">
                             <div className="flex items-center justify-between text-xs mb-0.5">
@@ -1128,10 +1224,9 @@ export default function Home() {
                             </div>
                             {isActive ? (
                               <input type="range" min={1} max={10} value={current}
-                                onChange={(event) => setDraftPriority((prev) => ({ ...prev, [property.id]: Number(event.target.value) }))}
-                                onMouseUp={() => commitPriority(property.id)}
-                                onTouchEnd={() => commitPriority(property.id)}
-                                onKeyUp={() => commitPriority(property.id)}
+                                aria-label={`${profile.name} priority for ${property.title ?? "Untitled property"}`}
+                                disabled={savingPriority[priorityKey(property.id)]}
+                                onChange={(event) => setDraftPriority((prev) => ({ ...prev, [priorityKey(property.id)]: Number(event.target.value) }))}
                                 className="w-full" />
                             ) : (
                               <div className="h-1.5 w-full" style={{ background: "var(--retro-panel)", border: "1px solid var(--retro-border)" }}>
@@ -1141,6 +1236,7 @@ export default function Home() {
                           </div>
                         );
                       })}
+                      {renderPriorityConfirm(property)}
                     </div>
 
                     <div className="retro-separator" />

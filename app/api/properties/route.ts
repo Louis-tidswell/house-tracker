@@ -2,7 +2,7 @@
 /// @author Shane
 /// @date Created: 2025-05-28
 /// @date Updated: 2025-05-28
-/// @brief GET all properties, POST a new property.
+/// @brief GET properties, POST a new property, DELETE a list's archived properties.
 
 import { create_supabase_client } from "@/lib/supabase";
 import { NextRequest } from "next/server";
@@ -46,6 +46,27 @@ export async function GET(request: NextRequest) {
     }));
 
     return Response.json({ ok: true, properties });
+}
+
+export async function DELETE(request: NextRequest) {
+    const listId = request.nextUrl.searchParams.get("listId");
+    if (!listId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(listId)) {
+        return Response.json({ ok: false, error: "A valid listId is required." }, { status: 400 });
+    }
+
+    const supabase = create_supabase_client();
+    const { data, error } = await supabase
+        .from("properties")
+        .delete()
+        .eq("list_id", listId)
+        .eq("status", "archived")
+        .select("id");
+
+    if (error) {
+        return Response.json({ ok: false, error: error.message }, { status: 500 });
+    }
+
+    return Response.json({ ok: true, deletedIds: (data ?? []).map((row) => row.id) });
 }
 
 export async function POST(request: Request) {
