@@ -83,7 +83,7 @@ function AddPropertyForm() {
         const controller = new AbortController();
         autoFillController.current?.abort();
         autoFillController.current = controller;
-        const timeout = setTimeout(() => controller.abort(), 25000);
+        const timeout = setTimeout(() => controller.abort(), 70000);
         setAutoFilling(true);
         setAutoFillMessage(null);
         setAutoFillFailed(false);

@@ -1,8 +1,8 @@
 import { validateListingUrl } from "@/lib/listing-extraction.mjs";
-import { fetchTavilyListing } from "@/lib/tavily-listing.mjs";
+import { fetchFirecrawlListing } from "@/lib/firecrawl-listing.mjs";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 90;
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ ok: false, message: "Auto fill supports HTTPS realestate.com.au property listing URLs." }, { status: 400 });
   }
-  const result = await fetchTavilyListing(url);
+  const result = await fetchFirecrawlListing(url);
   const messages: Record<string, string> = {
     not_configured: "Failed to fill. Auto fill is not configured yet. Please enter the details manually.",
     invalid_key: "Failed to fill. The listing service could not sign in. Please enter the details manually.",

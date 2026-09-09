@@ -78,7 +78,7 @@ function loadRoute(fakeFetchListing) {
   const source = readFileSync(new URL("../app/api/listing-extraction/route.ts", import.meta.url), "utf8");
   const exports = {};
   runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
-    exports, Response, URL, require() { return { validateListingUrl, fetchTavilyListing: fakeFetchListing }; },
+    exports, Response, URL, require() { return { validateListingUrl, fetchFirecrawlListing: fakeFetchListing }; },
   });
   return exports.POST;
 }
